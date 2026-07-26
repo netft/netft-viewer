@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RendererEvent } from "../../app/main/companion-supervisor";
 import type { NetftApi } from "../../app/preload";
 import { App } from "../../app/renderer/App";
+import { Actions } from "../../app/renderer/components/Actions";
 import { ConnectionPanel } from "../../app/renderer/components/ConnectionPanel";
 import { LiveWrenchTable } from "../../app/renderer/components/LiveWrenchTable";
 import { StatusPanel } from "../../app/renderer/components/StatusPanel";
@@ -37,6 +38,8 @@ const installApi = () => {
     startRecording: vi.fn(commandOk),
     stopRecording: vi.fn(commandOk),
     retryBackend: vi.fn(commandOk),
+    getPreferences: vi.fn(async () => DEFAULT_PREFERENCES),
+    updatePreferences: vi.fn(async () => DEFAULT_PREFERENCES),
     subscribe: vi.fn((nextListener) => {
       listener = nextListener;
       return unsubscribe;
@@ -165,6 +168,25 @@ describe("fixed sensor sidebar", () => {
     );
   });
 
+  it("redacts unsafe host and path values from the visible error summary", () => {
+    const state = {
+      ...liveState(),
+      health: {
+        ...liveState().health,
+        latestError: "connect /private/location failed for 10.0.0.3",
+      },
+    };
+
+    render(<StatusPanel state={state} />);
+
+    expect(screen.getByTestId("latest-error").textContent).not.toContain(
+      "/private/location",
+    );
+    expect(screen.getByTestId("latest-error").textContent).not.toContain(
+      "10.0.0.3",
+    );
+  });
+
   it("labels a frozen sample with sample-native units after reconfiguration", () => {
     const state: AppState = {
       ...liveState(),
@@ -199,7 +221,28 @@ describe("fixed sensor sidebar", () => {
     render(
       <>
         <ConnectionPanel state={state} {...handlers} />
-        <LiveWrenchTable state={state} {...handlers} />
+        <LiveWrenchTable state={state} />
+        <Actions
+          api={{
+            setPaused: async () => {
+              handlers.onPause();
+              return { success: true };
+            },
+            requestBias: async () => {
+              handlers.onBias();
+              return { success: true };
+            },
+            startRecording: async () => {
+              handlers.onRecord();
+              return { success: true };
+            },
+            stopRecording: async () => {
+              handlers.onStop();
+              return { success: true };
+            },
+          }}
+          state={state}
+        />
       </>,
     );
 

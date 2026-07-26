@@ -133,6 +133,17 @@
   margin-left: auto;
 }
 
+.theme-control select {
+  min-height: 30px;
+  padding: 0 24px 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .chart-live-button {
   display: inline-flex;
   align-items: center;
@@ -334,6 +345,97 @@
   color: var(--danger);
   background: var(--surface);
   border-color: var(--danger);
+}
+
+.action-error,
+.settings-warning {
+  display: block;
+  margin-top: 9px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-warning {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.backend-error-view {
+  min-width: 560px;
+  min-height: 0;
+  padding: clamp(72px, 14vh, 126px) clamp(56px, 8vw, 120px);
+  overflow: auto;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+.backend-error-heading {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.backend-error-heading svg {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--danger);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.backend-error-heading h2 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.025em;
+}
+
+.backend-error-details {
+  margin: 0 0 26px;
+}
+
+.backend-error-details > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 22%) minmax(0, 1fr);
+  gap: 24px;
+  padding: 17px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.backend-error-details dt {
+  font-weight: 700;
+}
+
+.backend-error-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.backend-error-details code {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.backend-retry {
+  min-width: 190px;
+}
+
+.backend-retry-note {
+  max-width: 520px;
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .status-list {

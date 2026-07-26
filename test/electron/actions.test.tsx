@@ -1,0 +1,288 @@
+// @vitest-environment jsdom
+
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { NetftApi } from "../../app/preload";
+import { App } from "../../app/renderer/App";
+import { Actions } from "../../app/renderer/components/Actions";
+import { BackendErrorView } from "../../app/renderer/components/BackendErrorView";
+import {
+  AXES,
+  createInitialAppState,
+  type AppState,
+} from "../../app/renderer/model/app-state";
+
+const deferred = <T,>() => {
+  let resolvePromise: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
+};
+
+const commands = (): NetftApi => ({
+  connect: vi.fn(async () => ({ success: true })),
+  disconnect: vi.fn(async () => ({ success: true })),
+  setPaused: vi.fn(async () => ({ success: true })),
+  requestBias: vi.fn(async () => ({ success: true })),
+  startRecording: vi.fn(async () => ({ success: true })),
+  stopRecording: vi.fn(async () => ({ success: true })),
+  retryBackend: vi.fn(async () => ({ success: true })),
+  getPreferences: vi.fn(async () => createInitialAppState().preferences),
+  updatePreferences: vi.fn(async () => createInitialAppState().preferences),
+  subscribe: vi.fn(() => () => {}),
+});
+
+const liveState = (): AppState => ({
+  ...createInitialAppState(),
+  backend: {
+    ...createInitialAppState().backend,
+    state: "running",
+    restartPending: false,
+  },
+  connection: "streaming",
+  connectionGeneration: "1",
+});
+
+afterEach(() => {
+  document.body.replaceChildren();
+});
+
+describe("Actions", () => {
+  it("waits for correlated Pause completion without optimistic state", async () => {
+    const pending = deferred<{ success: boolean }>();
+    const api = commands();
+    vi.mocked(api.setPaused).mockReturnValue(pending.promise);
+    const state = liveState();
+    const view = render(<Actions api={api} state={state} />);
+
+    fireEvent.click(screen.getByTestId("pause-action"));
+    fireEvent.click(screen.getByTestId("pause-action"));
+
+    expect(api.setPaused).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("pause-action").textContent).toContain("Pause");
+    expect(
+      (screen.getByTestId("pause-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("bias-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("recording-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    pending.resolve({ success: true });
+    await Promise.resolve();
+    expect(
+      (screen.getByTestId("pause-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    view.rerender(<Actions api={api} state={{ ...state, paused: true }} />);
+    await vi.waitFor(() =>
+      expect(
+        (screen.getByTestId("pause-action") as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+  });
+
+  it("disables Record while paused but leaves Stop available", () => {
+    const api = commands();
+    const paused = { ...liveState(), paused: true };
+    const idle = {
+      ...paused,
+      recording: { ...paused.recording, state: "idle" as const },
+    };
+    const view = render(<Actions api={api} state={idle} />);
+
+    expect(
+      (screen.getByTestId("recording-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    view.rerender(
+      <Actions
+        api={api}
+        state={{
+          ...paused,
+          recording: { ...paused.recording, state: "paused" },
+        }}
+      />,
+    );
+    expect(
+      (screen.getByTestId("recording-action") as HTMLButtonElement).disabled,
+    ).toBe(false);
+    fireEvent.click(screen.getByTestId("recording-action"));
+    expect(api.stopRecording).toHaveBeenCalledOnce();
+    expect(api.startRecording).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates Bias while native confirmation and command are pending", async () => {
+    const pending = deferred<{ success: boolean }>();
+    const api = commands();
+    vi.mocked(api.requestBias).mockReturnValue(pending.promise);
+    render(<Actions api={api} state={liveState()} />);
+
+    fireEvent.click(screen.getByTestId("bias-action"));
+    fireEvent.click(screen.getByTestId("bias-action"));
+
+    expect(api.requestBias).toHaveBeenCalledOnce();
+    pending.resolve({ success: true });
+    await vi.waitFor(() =>
+      expect(
+        (screen.getByTestId("bias-action") as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+  });
+
+  it("surfaces command failure without changing authoritative state", async () => {
+    const api = commands();
+    vi.mocked(api.setPaused).mockResolvedValue({
+      success: false,
+      errorCode: "pause_failed",
+      errorMessage: "private raw backend message",
+    });
+    render(<Actions api={api} state={liveState()} />);
+
+    fireEvent.click(screen.getByTestId("pause-action"));
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole("status").dataset.errorCode).toBe("pause_failed"),
+    );
+    expect(screen.getByRole("status").textContent).not.toContain(
+      "private raw backend message",
+    );
+    expect(screen.getByTestId("pause-action").textContent).toContain("Pause");
+  });
+});
+
+describe("BackendErrorView", () => {
+  it("retries only the backend and exposes selectable structured diagnostics", async () => {
+    const api = commands();
+    const state = {
+      ...liveState(),
+      backend: {
+        state: "failed" as const,
+        restartPending: false,
+        startAttempts: 3,
+        lastError: "spawn failed",
+        lastMonotonicNs: "9",
+        logPath: "/var/log/netft-viewer/companion.log",
+      },
+      recoverablePartialPath: "/data/capture.csv.partial",
+      connection: "disconnected" as const,
+    };
+    render(<BackendErrorView api={api} state={state} />);
+
+    fireEvent.click(screen.getByTestId("retry-backend"));
+    fireEvent.click(screen.getByTestId("retry-backend"));
+
+    expect(api.retryBackend).toHaveBeenCalledOnce();
+    expect(api.connect).not.toHaveBeenCalled();
+    expect(api.startRecording).not.toHaveBeenCalled();
+    expect(api.requestBias).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("backend-technical-detail").style.userSelect,
+    ).toBe("text");
+    expect(screen.getByTestId("backend-log-path").textContent).toContain(
+      "companion.log",
+    );
+    expect(screen.getByTestId("backend-partial-path").textContent).toContain(
+      ".partial",
+    );
+  });
+});
+
+describe("preference hydration", () => {
+  it("hydrates before applying and coalesces chart and theme updates", async () => {
+    const api = commands();
+    const hydrated = {
+      sensorHost: "sensor.example",
+      plotMode: "panels" as const,
+      timeWindowSeconds: 30 as const,
+      visibleAxes: AXES.filter((axis) => axis !== "Tz"),
+      theme: "dark" as const,
+    };
+    vi.mocked(api.getPreferences).mockResolvedValue(hydrated);
+    vi.mocked(api.updatePreferences).mockImplementation(async (patch) => ({
+      ...hydrated,
+      ...patch,
+    }));
+    Object.defineProperty(window, "netft", {
+      configurable: true,
+      value: api,
+    });
+
+    render(<App />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+        "dark",
+      ),
+    );
+    expect(screen.getByTestId("chart-mode-panels").ariaPressed).toBe("true");
+    expect(screen.getByTestId("chart-window-30").ariaPressed).toBe("true");
+    expect(screen.getByTestId("axis-visibility-Tz").ariaPressed).toBe("false");
+
+    fireEvent.click(screen.getByTestId("chart-mode-combined"));
+    fireEvent.click(screen.getByTestId("chart-window-60"));
+    fireEvent.change(screen.getByTestId("theme-preference"), {
+      target: { value: "light" },
+    });
+
+    await vi.waitFor(
+      () => expect(api.updatePreferences).toHaveBeenCalledOnce(),
+      { timeout: 1_000 },
+    );
+    expect(api.updatePreferences).toHaveBeenCalledWith({
+      plotMode: "combined",
+      timeWindowSeconds: 60,
+      theme: "light",
+    });
+    expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+      "light",
+    );
+
+    fireEvent.change(screen.getByTestId("sensor-host-input"), {
+      target: { value: "typed.example" },
+    });
+    await new Promise((resolvePromise) => {
+      window.setTimeout(resolvePromise, 300);
+    });
+    expect(api.updatePreferences).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a live preference while surfacing a persistence failure", async () => {
+    const api = commands();
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      ...createInitialAppState().preferences,
+      theme: "light",
+    });
+    vi.mocked(api.updatePreferences).mockRejectedValue(
+      new Error("settings unavailable"),
+    );
+    Object.defineProperty(window, "netft", {
+      configurable: true,
+      value: api,
+    });
+    render(<App />);
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+        "light",
+      ),
+    );
+
+    fireEvent.change(screen.getByTestId("theme-preference"), {
+      target: { value: "dark" },
+    });
+
+    await vi.waitFor(
+      () =>
+        expect(
+          document.querySelector<HTMLOutputElement>(".settings-warning")
+            ?.dataset.errorCode,
+        ).toBe("settings_unavailable"),
+      { timeout: 1_000 },
+    );
+    expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+      "dark",
+    );
+  });
+});

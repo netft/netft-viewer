@@ -40,6 +40,14 @@ export type RendererEvent =
       type: "backend_state";
       monotonicNs: string;
       payload: CompanionSupervisorSnapshot;
+    }
+  | {
+      type: "settings_error";
+      monotonicNs: string;
+      payload: {
+        operation: "read" | "write";
+        errorCode: "settings_unavailable";
+      };
     };
 
 export interface CompanionProcess {
@@ -78,13 +86,14 @@ export interface CompanionSupervisorOptions {
   spawnProcess?: ProcessSpawner;
   schedule?: (milliseconds: number) => Promise<void>;
   requestTimeoutMs?: number;
-  logStore?: Pick<LogStore, "append">;
+  logStore?: Pick<LogStore, "append"> & Partial<Pick<LogStore, "path">>;
 }
 
 export interface CompanionSupervisorSnapshot {
   state: "stopped" | "starting" | "running" | "stopping" | "failed";
   startAttempts: number;
   lastError?: string;
+  logPath?: string;
 }
 
 interface PendingRequest {
@@ -559,11 +568,17 @@ export class CompanionSupervisor {
   }
 
   private updateSnapshot(snapshot: CompanionSupervisorSnapshot): void {
-    this.snapshotValue = snapshot;
+    const enriched = {
+      ...snapshot,
+      ...(this.options.logStore?.path === undefined
+        ? {}
+        : { logPath: this.options.logStore.path }),
+    };
+    this.snapshotValue = enriched;
     this.emit({
       type: "backend_state",
       monotonicNs: monotonicNanoseconds(),
-      payload: { ...snapshot },
+      payload: { ...enriched },
     });
   }
 

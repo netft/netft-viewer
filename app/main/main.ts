@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,8 +7,10 @@ import type {
 } from "electron";
 
 import { CompanionSupervisor } from "./companion-supervisor";
+import { DialogService } from "./dialog-service";
 import { registerIpcHandlers } from "./ipc-handlers";
 import { LogStore } from "./log-store";
+import { SettingsStore } from "./settings-store";
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -306,6 +307,8 @@ const boot = async (): Promise<void> => {
     rendererUrl,
   });
   const logs = new LogStore(app.getPath("logs"));
+  const settings = new SettingsStore(app.getPath("userData"));
+  const dialogs = new DialogService({ dialog });
   const supervisor = new CompanionSupervisor({
     executablePath: resolveCompanionExecutable({
       packaged: app.isPackaged,
@@ -320,31 +323,9 @@ const boot = async (): Promise<void> => {
     ipcMain,
     trustedWebContents: window.webContents,
     supervisor,
-    selectRecordingPath: async () => {
-      const result = await dialog.showSaveDialog({
-        defaultPath: "netft-recording.csv",
-        filters: [{ name: "CSV", extensions: ["csv"] }],
-        properties: ["createDirectory", "showOverwriteConfirmation"],
-      });
-      if (result.canceled || result.filePath.length === 0) {
-        return undefined;
-      }
-      return {
-        targetPath: result.filePath,
-        overwrite: existsSync(result.filePath),
-      };
-    },
-    confirmBias: async () => {
-      const result = await dialog.showMessageBox({
-        type: "warning",
-        buttons: ["Cancel", "Apply Bias"],
-        cancelId: 0,
-        defaultId: 0,
-        noLink: true,
-        message: "Apply sensor bias only under a safe and stable load.",
-      });
-      return result.response === 1;
-    },
+    selectRecordingPath: async () => dialogs.selectRecordingPath(),
+    confirmBias: async () => dialogs.confirmBias(),
+    settings,
   });
   bindApplicationLifecycle({
     app,

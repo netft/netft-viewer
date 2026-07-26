@@ -35,7 +35,14 @@ export type ChartViewAction =
     }
   | { type: "manual_navigation" }
   | { type: "live_requested" }
-  | { type: "view_reset" };
+  | { type: "view_reset" }
+  | {
+      type: "preferences_received";
+      preferences: Pick<
+        Preferences,
+        "plotMode" | "timeWindowSeconds" | "visibleAxes"
+      >;
+    };
 
 export const TIME_WINDOWS_SECONDS = [1, 5, 10, 30, 60] as const;
 
@@ -101,6 +108,13 @@ export const reduceChartViewState = (
       return state.followLive ? state : { ...state, followLive: true };
     case "view_reset":
       return { ...state, resetRevision: state.resetRevision + 1 };
+    case "preferences_received":
+      return {
+        ...state,
+        mode: action.preferences.plotMode,
+        windowSeconds: action.preferences.timeWindowSeconds,
+        visibleAxes: orderedVisibleAxes(action.preferences.visibleAxes),
+      };
   }
 };
 

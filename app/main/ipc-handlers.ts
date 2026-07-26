@@ -7,6 +7,12 @@ import type {
   CompanionSupervisor,
   RendererEvent,
 } from "./companion-supervisor";
+import type {
+  PreferencesPatch,
+  SettingsStore,
+  ViewerPreferences,
+} from "./settings-store";
+import { SensorHostSchema } from "./settings-store";
 
 export const IPC_CHANNELS = {
   connect: "netft:connect",
@@ -16,6 +22,8 @@ export const IPC_CHANNELS = {
   startRecording: "netft:start-recording",
   stopRecording: "netft:stop-recording",
   retryBackend: "netft:retry-backend",
+  getPreferences: "netft:get-preferences",
+  updatePreferences: "netft:update-preferences",
   event: "netft:event",
 } as const;
 
@@ -64,28 +72,8 @@ export interface RegisterIpcHandlersOptions {
   supervisor: SupervisorCommands | CompanionSupervisor;
   selectRecordingPath: () => Promise<RecordingSelection | undefined>;
   confirmBias?: () => Promise<boolean>;
+  settings?: Pick<SettingsStore, "snapshot" | "update">;
 }
-
-const sensorHostSchema = z
-  .string()
-  .min(1)
-  .max(253)
-  .refine((value) => {
-    if (/^[0-9.]+$/.test(value)) {
-      const parts = value.split(".");
-      return (
-        parts.length === 4 &&
-        parts.every(
-          (part) => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255,
-        )
-      );
-    }
-    return value
-      .split(".")
-      .every((label) =>
-        /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label),
-      );
-  });
 
 const canceledResult = (): CommandResult => ({
   success: false,
@@ -103,6 +91,7 @@ export const registerIpcHandlers = (
   options: RegisterIpcHandlersOptions,
 ): (() => void) => {
   const registered: string[] = [];
+  const pending = new Map<string, Promise<unknown>>();
   const trusted = (
     handler: (...arguments_: unknown[]) => unknown,
   ): IpcHandler => {
@@ -110,7 +99,8 @@ export const registerIpcHandlers = (
       if (
         event.sender !== options.trustedWebContents ||
         event.senderFrame === null ||
-        event.senderFrame !== options.trustedWebContents.mainFrame
+        event.senderFrame !== options.trustedWebContents.mainFrame ||
+        options.trustedWebContents.isDestroyed?.() === true
       ) {
         throw new Error("untrusted IPC sender");
       }
@@ -125,54 +115,133 @@ export const registerIpcHandlers = (
     options.ipcMain.handle(channel, trusted(handler));
     registered.push(channel);
   };
+  const deduplicated = <Result>(
+    key: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> => {
+    const existing = pending.get(key);
+    if (existing !== undefined) {
+      return existing as Promise<Result>;
+    }
+    const request = operation().finally(() => {
+      if (pending.get(key) === request) {
+        pending.delete(key);
+      }
+    });
+    pending.set(key, request);
+    return request;
+  };
+  const emitSettingsError = (operation: "read" | "write"): void => {
+    try {
+      options.trustedWebContents.send?.(IPC_CHANNELS.event, {
+        type: "settings_error",
+        monotonicNs: process.hrtime.bigint().toString(),
+        payload: {
+          operation,
+          errorCode: "settings_unavailable",
+        },
+      });
+    } catch {
+      // A settings warning must not outlive its renderer.
+    }
+  };
 
-  register(IPC_CHANNELS.connect, (sensorHost) =>
-    options.supervisor.command("connect", {
-      sensorHost: sensorHostSchema.parse(sensorHost),
-    }),
-  );
+  register(IPC_CHANNELS.connect, (sensorHost) => {
+    const validatedHost = SensorHostSchema.parse(sensorHost);
+    return deduplicated(IPC_CHANNELS.connect, async () => {
+      const result = await options.supervisor.command("connect", {
+        sensorHost: validatedHost,
+      });
+      if (result.success && options.settings !== undefined) {
+        try {
+          await options.settings.update({ sensorHost: validatedHost });
+        } catch {
+          emitSettingsError("write");
+        }
+      }
+      return result;
+    });
+  });
   register(IPC_CHANNELS.disconnect, (...arguments_) => {
     requireNoArguments(arguments_);
-    return options.supervisor.command("disconnect", {});
+    return deduplicated(IPC_CHANNELS.disconnect, async () =>
+      options.supervisor.command("disconnect", {}),
+    );
   });
   register(IPC_CHANNELS.setPaused, (paused, ...extra) => {
     requireNoArguments(extra);
-    return options.supervisor.command("set_paused", {
-      paused: z.boolean().parse(paused),
-    });
+    const validatedPaused = z.boolean().parse(paused);
+    return deduplicated(IPC_CHANNELS.setPaused, async () =>
+      options.supervisor.command("set_paused", {
+        paused: validatedPaused,
+      }),
+    );
   });
   register(IPC_CHANNELS.requestBias, async (...arguments_) => {
     requireNoArguments(arguments_);
-    if (options.confirmBias === undefined || !(await options.confirmBias())) {
-      return canceledResult();
-    }
-    return options.supervisor.command("bias", {});
+    return deduplicated(IPC_CHANNELS.requestBias, async () => {
+      if (options.confirmBias === undefined || !(await options.confirmBias())) {
+        return canceledResult();
+      }
+      if (options.trustedWebContents.isDestroyed?.() === true) {
+        return canceledResult();
+      }
+      return options.supervisor.command("bias", {});
+    });
   });
   register(IPC_CHANNELS.startRecording, async (...arguments_) => {
     requireNoArguments(arguments_);
-    const selection = await options.selectRecordingPath();
-    if (selection === undefined) {
-      return canceledResult();
-    }
-    if (
-      !isAbsolute(selection.targetPath) ||
-      !selection.targetPath.toLowerCase().endsWith(".csv")
-    ) {
-      throw new Error("invalid recording destination");
-    }
-    return options.supervisor.command("start_recording", {
-      targetPath: selection.targetPath,
-      overwrite: selection.overwrite,
+    return deduplicated(IPC_CHANNELS.startRecording, async () => {
+      const selection = await options.selectRecordingPath();
+      if (selection === undefined) {
+        return canceledResult();
+      }
+      if (options.trustedWebContents.isDestroyed?.() === true) {
+        return canceledResult();
+      }
+      if (
+        !isAbsolute(selection.targetPath) ||
+        !selection.targetPath.toLowerCase().endsWith(".csv")
+      ) {
+        throw new Error("invalid recording destination");
+      }
+      return options.supervisor.command("start_recording", {
+        targetPath: selection.targetPath,
+        overwrite: selection.overwrite,
+      });
     });
   });
   register(IPC_CHANNELS.stopRecording, (...arguments_) => {
     requireNoArguments(arguments_);
-    return options.supervisor.command("stop_recording", {});
+    return deduplicated(IPC_CHANNELS.stopRecording, async () =>
+      options.supervisor.command("stop_recording", {}),
+    );
   });
   register(IPC_CHANNELS.retryBackend, async (...arguments_) => {
     requireNoArguments(arguments_);
-    await options.supervisor.retry();
-    return { success: true } satisfies CommandResult;
+    return deduplicated(IPC_CHANNELS.retryBackend, async () => {
+      await options.supervisor.retry();
+      return { success: true } satisfies CommandResult;
+    });
+  });
+  register(IPC_CHANNELS.getPreferences, (...arguments_) => {
+    requireNoArguments(arguments_);
+    if (options.settings === undefined) {
+      emitSettingsError("read");
+      throw new Error("settings unavailable");
+    }
+    return options.settings.snapshot();
+  });
+  register(IPC_CHANNELS.updatePreferences, (patch, ...extra) => {
+    requireNoArguments(extra);
+    if (options.settings === undefined) {
+      emitSettingsError("write");
+      throw new Error("settings unavailable");
+    }
+    return options.settings.update(patch as PreferencesPatch).catch(() => {
+      emitSettingsError("write");
+      throw new Error("settings unavailable");
+    }) satisfies Promise<ViewerPreferences>;
   });
 
   const unsubscribe = options.supervisor.subscribe((event) => {

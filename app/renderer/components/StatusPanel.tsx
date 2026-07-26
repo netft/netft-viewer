@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from "react";
 
 import type { AppState } from "../model/app-state";
+import { safeDiagnostic } from "../model/safe-error";
 
 interface StatusRowProps {
   label: string;
@@ -81,8 +82,9 @@ const StatusPanelView = ({ state }: { state: AppState }) => {
   const bufferPercent = queuePercent(state);
   const deviceStatus = state.health.deviceStatus;
   const deviceOkay = state.connection === "streaming" && deviceStatus === 0;
+  const rawError = state.recording.lastError || state.health.latestError;
   const latestError =
-    state.recording.lastError || state.health.latestError || "—";
+    rawError.length === 0 ? "—" : safeDiagnostic(rawError, "Unavailable");
 
   return (
     <section className="sidebar-section status-panel">

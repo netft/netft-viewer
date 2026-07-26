@@ -38,6 +38,7 @@ export interface BackendView {
   startAttempts: number;
   lastError: string;
   lastMonotonicNs: string;
+  logPath?: string;
 }
 
 export interface HealthView {
@@ -103,13 +104,16 @@ export interface AppState {
   plot: PlotView;
   configuration: ConfigurationView;
   preferences: Preferences;
+  recoverablePartialPath: string;
+  settingsErrorCode: string;
   lastErrorSequence: string | null;
 }
 
 export type AppAction =
   | RendererEvent
   | { type: "sensor_host_changed"; sensorHost: string }
-  | { type: "preferences_received"; preferences: Preferences };
+  | { type: "preferences_received"; preferences: Preferences }
+  | { type: "preferences_patched"; patch: Partial<Preferences> };
 
 const DEFAULT_PREFERENCES: Preferences = {
   sensorHost: "192.168.1.1",
@@ -222,6 +226,7 @@ export const createInitialAppState = (
     startAttempts: 0,
     lastError: "",
     lastMonotonicNs: "0",
+    logPath: "",
   },
   connection: "disconnected",
   connectionGeneration: "0",
@@ -251,6 +256,8 @@ export const createInitialAppState = (
     ...preferences,
     visibleAxes: [...preferences.visibleAxes],
   },
+  recoverablePartialPath: "",
+  settingsErrorCode: "",
   lastErrorSequence: null,
 });
 
@@ -398,7 +405,29 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
     case "sensor_host_changed":
       return { ...state, sensorHost: action.sensorHost };
     case "preferences_received":
-      return createInitialAppState(action.preferences);
+      return {
+        ...state,
+        sensorHost:
+          state.connection === "disconnected"
+            ? action.preferences.sensorHost
+            : state.sensorHost,
+        preferences: {
+          ...action.preferences,
+          visibleAxes: [...action.preferences.visibleAxes],
+        },
+      };
+    case "preferences_patched":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          ...action.patch,
+          visibleAxes:
+            action.patch.visibleAxes === undefined
+              ? state.preferences.visibleAxes
+              : [...action.patch.visibleAxes],
+        },
+      };
     case "backend_disconnected": {
       if (!isNewer(action.monotonicNs, state.backend.lastMonotonicNs)) {
         return state;
@@ -424,6 +453,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         startAttempts: action.payload.startAttempts,
         lastError: action.payload.lastError ?? "",
         lastMonotonicNs: action.monotonicNs,
+        logPath: action.payload.logPath ?? state.backend.logPath,
       };
       return action.payload.state === "running"
         ? { ...state, backend }
@@ -473,7 +503,15 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         },
       };
     case "recording_state":
-      return reduceRecordingState(state, action);
+      return reduceRecordingState(
+        action.payload.partialPath.length > 0
+          ? {
+              ...state,
+              recoverablePartialPath: action.payload.partialPath,
+            }
+          : state,
+        action,
+      );
     case "recording_progress":
       return reduceRecordingProgress(state, action);
     case "configuration_changed":
@@ -517,6 +555,11 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
             ? { ...state.recording, lastError: action.payload.message }
             : state.recording,
         lastErrorSequence: action.payload.sequence,
+      };
+    case "settings_error":
+      return {
+        ...state,
+        settingsErrorCode: action.payload.errorCode,
       };
     case "hello":
     case "command_result":

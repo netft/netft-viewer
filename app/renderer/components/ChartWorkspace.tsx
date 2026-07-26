@@ -20,7 +20,13 @@ import {
   reduceChartViewState,
   type ChartViewAction,
 } from "../model/chart-model";
-import { AXES, type AppState, type Axis } from "../model/app-state";
+import {
+  AXES,
+  type AppState,
+  type Axis,
+  type Preferences,
+  type ViewerTheme,
+} from "../model/app-state";
 import { ChartToolbar } from "./ChartToolbar";
 import {
   defaultEChartRuntime,
@@ -120,6 +126,15 @@ export interface ChartWorkspaceProps {
   theme: ResolvedViewerTheme;
   runtime?: EChartRuntime;
   registerEventSink?: (sink: (event: RendererEvent) => void) => () => void;
+  onPreferencesChange?: (
+    patch: Partial<
+      Pick<
+        Preferences,
+        "plotMode" | "timeWindowSeconds" | "visibleAxes" | "theme"
+      >
+    >,
+  ) => void;
+  themePreference?: ViewerTheme;
 }
 
 interface SessionBoundary {
@@ -143,6 +158,8 @@ export const ChartWorkspace = ({
   theme,
   runtime = defaultEChartRuntime,
   registerEventSink,
+  onPreferencesChange,
+  themePreference = "system",
 }: ChartWorkspaceProps) => {
   const modelRef = useRef<ChartModel>(
     new ChartModel(state.preferences.timeWindowSeconds * 1_000),
@@ -237,6 +254,17 @@ export const ChartWorkspace = ({
   }, [consumeRendererEvent, registerEventSink]);
 
   useEffect(() => {
+    dispatchView({
+      type: "preferences_received",
+      preferences: state.preferences,
+    });
+  }, [
+    state.preferences.plotMode,
+    state.preferences.timeWindowSeconds,
+    state.preferences.visibleAxes,
+  ]);
+
+  useEffect(() => {
     if (modelRef.current.setWindowMs(view.windowSeconds * 1_000)) {
       setModelRevision(modelRef.current.revision);
     }
@@ -285,9 +313,27 @@ export const ChartWorkspace = ({
     state.plot.lastMonotonicNs,
   ]);
 
-  const dispatch = useCallback((action: ChartViewAction) => {
-    dispatchView(action);
-  }, []);
+  const dispatch = useCallback(
+    (action: ChartViewAction) => {
+      dispatchView(action);
+      switch (action.type) {
+        case "mode_changed":
+          onPreferencesChange?.({ plotMode: action.mode });
+          return;
+        case "window_changed":
+          onPreferencesChange?.({ timeWindowSeconds: action.seconds });
+          return;
+        case "axis_visibility_changed": {
+          const next = reduceChartViewState(view, action);
+          onPreferencesChange?.({ visibleAxes: next.visibleAxes });
+          return;
+        }
+        default:
+          return;
+      }
+    },
+    [onPreferencesChange, view],
+  );
   const manualNavigation = useCallback(() => {
     dispatchView({ type: "manual_navigation" });
   }, []);
@@ -303,8 +349,13 @@ export const ChartWorkspace = ({
           });
         }
       }
+      onPreferencesChange?.({
+        visibleAxes: AXES.filter(
+          (axis) => selection[axis] ?? view.visibleAxes.includes(axis),
+        ),
+      });
     },
-    [],
+    [onPreferencesChange, view.visibleAxes],
   );
   const optionContext = useMemo(
     () => ({
@@ -348,7 +399,14 @@ export const ChartWorkspace = ({
       data-testid="chart-workspace"
       data-visible-axis-count={view.visibleAxes.length}
     >
-      <ChartToolbar dispatch={dispatch} view={view} />
+      <ChartToolbar
+        dispatch={dispatch}
+        onThemeChange={(preference) => {
+          onPreferencesChange?.({ theme: preference });
+        }}
+        themePreference={themePreference}
+        view={view}
+      />
       <ChartErrorBoundary>
         {view.mode === "combined" ? (
           <div className="combined-chart-layout">

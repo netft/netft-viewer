@@ -275,6 +275,37 @@ describe("ChartWorkspace", () => {
     expect(screen.getByTestId("axis-visibility-Fy").ariaPressed).toBe("false");
   });
 
+  it("persists one coherent visible-axis snapshot for a multi-axis legend event", () => {
+    const runtime = new TestRuntime();
+    const onPreferencesChange = vi.fn();
+    render(
+      <ChartWorkspace
+        onPreferencesChange={onPreferencesChange}
+        runtime={runtime}
+        state={stateWithPlot()}
+        theme="light"
+      />,
+    );
+    const instance = [...runtime.instances][0];
+
+    act(() => {
+      instance?.emit("legendselectchanged", {
+        selected: {
+          Fx: true,
+          Fy: false,
+          Fz: false,
+          Tx: true,
+          Ty: true,
+          Tz: true,
+        },
+      });
+    });
+
+    expect(onPreferencesChange).toHaveBeenLastCalledWith({
+      visibleAxes: ["Fx", "Tx", "Ty", "Tz"],
+    });
+  });
+
   it("leaves live following on manual navigation and ignores programmatic zoom", () => {
     const runtime = new TestRuntime();
     render(

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { RendererEvent } from "../main/companion-supervisor";
+import type { PreferencesPatch } from "../main/settings-store";
+import { Actions } from "./components/Actions";
+import { BackendErrorView } from "./components/BackendErrorView";
 import { ChartWorkspace } from "./components/ChartWorkspace";
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { LiveWrenchTable } from "./components/LiveWrenchTable";
@@ -12,12 +15,6 @@ import {
 } from "./model/app-state";
 import { createRendererEventScheduler } from "./model/event-scheduler";
 import { useViewerTheme } from "./model/viewer-theme";
-
-const invoke = (request: Promise<unknown>): void => {
-  void request.catch(() => {
-    // Structured backend and command failures arrive through renderer events.
-  });
-};
 
 const scheduleDisplayFrame = (callback: FrameRequestCallback): number =>
   typeof window.requestAnimationFrame === "function"
@@ -43,6 +40,15 @@ export const App = ({ initialPreferences }: AppProps) => {
     createInitialAppState,
   );
   const theme = useViewerTheme(state.preferences.theme);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const [connectionPending, setConnectionPending] = useState(false);
+  const connectionPendingRef = useRef<
+    { kind: "connect" | "disconnect"; commandComplete: boolean } | undefined
+  >(undefined);
+  const hydratedPreferencesRef = useRef(initialPreferences !== undefined);
+  const pendingPreferencesRef = useRef<PreferencesPatch>({});
+  const preferenceTimerRef = useRef<number | undefined>(undefined);
   const chartEventSinkRef = useRef<
     ((event: RendererEvent) => void) | undefined
   >(undefined);
@@ -74,27 +80,147 @@ export const App = ({ initialPreferences }: AppProps) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (initialPreferences !== undefined) {
+      return;
+    }
+    let active = true;
+    void window.netft
+      .getPreferences()
+      .then((preferences) => {
+        if (active) {
+          dispatch({ type: "preferences_received", preferences });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          dispatch({
+            type: "settings_error",
+            monotonicNs: "1",
+            payload: {
+              operation: "read",
+              errorCode: "settings_unavailable",
+            },
+          });
+        }
+      })
+      .finally(() => {
+        if (active) {
+          hydratedPreferencesRef.current = true;
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialPreferences]);
+
+  const flushPreferences = useCallback((): void => {
+    preferenceTimerRef.current = undefined;
+    const patch = pendingPreferencesRef.current;
+    pendingPreferencesRef.current = {};
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    void window.netft.updatePreferences(patch).catch(() => {
+      dispatch({
+        type: "settings_error",
+        monotonicNs: "1",
+        payload: {
+          operation: "write",
+          errorCode: "settings_unavailable",
+        },
+      });
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (preferenceTimerRef.current !== undefined) {
+        window.clearTimeout(preferenceTimerRef.current);
+        flushPreferences();
+      }
+    },
+    [flushPreferences],
+  );
+
+  const changePreferences = useCallback(
+    (patch: PreferencesPatch): void => {
+      dispatch({ type: "preferences_patched", patch });
+      if (!hydratedPreferencesRef.current) {
+        return;
+      }
+      pendingPreferencesRef.current = {
+        ...pendingPreferencesRef.current,
+        ...patch,
+      };
+      if (preferenceTimerRef.current !== undefined) {
+        window.clearTimeout(preferenceTimerRef.current);
+      }
+      preferenceTimerRef.current = window.setTimeout(flushPreferences, 250);
+    },
+    [flushPreferences],
+  );
+
   const changeHost = useCallback((sensorHost: string) => {
     dispatch({ type: "sensor_host_changed", sensorHost });
   }, []);
+  const completeConnectionIfAuthoritative = useCallback((): void => {
+    const pending = connectionPendingRef.current;
+    if (pending === undefined || !pending.commandComplete) {
+      return;
+    }
+    const reached =
+      pending.kind === "connect"
+        ? !["disconnected", "error"].includes(stateRef.current.connection)
+        : stateRef.current.connection === "disconnected";
+    if (reached) {
+      connectionPendingRef.current = undefined;
+      setConnectionPending(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    completeConnectionIfAuthoritative();
+  }, [completeConnectionIfAuthoritative, state.connection]);
+
+  const runConnection = useCallback(
+    (kind: "connect" | "disconnect"): void => {
+      if (connectionPendingRef.current !== undefined) {
+        return;
+      }
+      connectionPendingRef.current = { kind, commandComplete: false };
+      setConnectionPending(true);
+      const request =
+        kind === "connect"
+          ? window.netft.connect(stateRef.current.sensorHost)
+          : window.netft.disconnect();
+      void request
+        .then((result) => {
+          const pending = connectionPendingRef.current;
+          if (pending?.kind !== kind) {
+            return;
+          }
+          if (!result.success) {
+            connectionPendingRef.current = undefined;
+            setConnectionPending(false);
+            return;
+          }
+          pending.commandComplete = true;
+          completeConnectionIfAuthoritative();
+        })
+        .catch(() => {
+          connectionPendingRef.current = undefined;
+          setConnectionPending(false);
+        });
+    },
+    [completeConnectionIfAuthoritative],
+  );
   const connect = useCallback(() => {
-    invoke(window.netft.connect(state.sensorHost));
-  }, [state.sensorHost]);
+    runConnection("connect");
+  }, [runConnection]);
   const disconnect = useCallback(() => {
-    invoke(window.netft.disconnect());
-  }, []);
-  const togglePause = useCallback(() => {
-    invoke(window.netft.setPaused(!state.paused));
-  }, [state.paused]);
-  const bias = useCallback(() => {
-    invoke(window.netft.requestBias());
-  }, []);
-  const record = useCallback(() => {
-    invoke(window.netft.startRecording());
-  }, []);
-  const stop = useCallback(() => {
-    invoke(window.netft.stopRecording());
-  }, []);
+    runConnection("disconnect");
+  }, [runConnection]);
 
   return (
     <div
@@ -115,22 +241,37 @@ export const App = ({ initialPreferences }: AppProps) => {
           onConnect={connect}
           onDisconnect={disconnect}
           onHostChange={changeHost}
+          actionPending={connectionPending}
           state={state}
         />
         <StatusPanel state={state} />
-        <LiveWrenchTable
-          onBias={bias}
-          onPause={togglePause}
-          onRecord={record}
-          onStop={stop}
+        <LiveWrenchTable state={state} />
+        <Actions
+          api={window.netft}
+          disabled={connectionPending}
           state={state}
         />
+        {state.settingsErrorCode.length > 0 ? (
+          <output
+            className="settings-warning"
+            data-error-code={state.settingsErrorCode}
+            role="status"
+          >
+            Preferences could not be saved. Current controls remain active.
+          </output>
+        ) : null}
       </aside>
-      <ChartWorkspace
-        registerEventSink={registerChartEventSink}
-        state={state}
-        theme={theme}
-      />
+      {state.backend.state === "failed" ? (
+        <BackendErrorView api={window.netft} state={state} />
+      ) : (
+        <ChartWorkspace
+          onPreferencesChange={changePreferences}
+          registerEventSink={registerChartEventSink}
+          state={state}
+          theme={theme}
+          themePreference={state.preferences.theme}
+        />
+      )}
     </div>
   );
 };

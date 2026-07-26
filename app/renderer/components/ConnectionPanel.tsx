@@ -13,6 +13,7 @@ export interface SidebarHandlers {
 }
 
 export interface ConnectionPanelProps extends SidebarHandlers {
+  actionPending?: boolean;
   state: AppState;
 }
 
@@ -28,15 +29,18 @@ const ConnectionPanelView = ({
   onHostChange,
   onConnect,
   onDisconnect,
+  actionPending = false,
 }: ConnectionPanelProps) => {
   const active = ACTIVE_CONNECTION_STATES.has(state.connection);
   const canConnect =
     state.backend.state === "running" &&
     !active &&
+    !actionPending &&
     state.sensorHost.trim().length > 0;
   const canDisconnect =
     state.backend.state === "running" &&
     active &&
+    !actionPending &&
     state.connection !== "disconnecting";
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     onHostChange?.(event.currentTarget.value);
@@ -58,7 +62,9 @@ const ConnectionPanelView = ({
             autoCapitalize="none"
             autoComplete="off"
             data-testid="sensor-host-input"
-            disabled={active}
+            disabled={
+              active || state.backend.state !== "running" || actionPending
+            }
             onChange={handleChange}
             spellCheck={false}
             type="text"
@@ -69,6 +75,7 @@ const ConnectionPanelView = ({
           <button
             className="button button-secondary"
             data-testid="connection-action"
+            aria-busy={actionPending}
             disabled={!canDisconnect}
             onClick={onDisconnect}
             type="button"
@@ -79,6 +86,7 @@ const ConnectionPanelView = ({
           <button
             className="button button-primary"
             data-testid="connection-action"
+            aria-busy={actionPending}
             disabled={!canConnect}
             onClick={onConnect}
             type="button"
@@ -97,6 +105,7 @@ export const ConnectionPanel = memo(
     previous.state.backend.state === next.state.backend.state &&
     previous.state.connection === next.state.connection &&
     previous.state.sensorHost === next.state.sensorHost &&
+    previous.actionPending === next.actionPending &&
     previous.onHostChange === next.onHostChange &&
     previous.onConnect === next.onConnect &&
     previous.onDisconnect === next.onDisconnect,
