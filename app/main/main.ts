@@ -1,5 +1,5 @@
-import { isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 
 import type {
   BrowserWindowConstructorOptions,
@@ -192,6 +192,13 @@ export const resolveCompanionExecutable = (
     platform === "win32"
       ? "netft-viewer-companion.exe"
       : "netft-viewer-companion";
+  if (
+    typeof NETFT_VIEWER_E2E_BUILD === "boolean" &&
+    NETFT_VIEWER_E2E_BUILD &&
+    options.packaged
+  ) {
+    return resolve(options.resourcesPath, "fake-companion.mjs");
+  }
   return options.packaged
     ? resolve(options.resourcesPath, "companion", executable)
     : resolve(
@@ -204,13 +211,99 @@ export const resolveCompanionExecutable = (
       );
 };
 
-export const resolveRendererAssetUrl = (
-  buildDirectory: string,
-  rendererName: string,
-): string =>
-  pathToFileURL(
-    join(buildDirectory, "..", "renderer", rendererName, "index.html"),
-  ).toString();
+const RENDERER_SCHEME = "netft-viewer";
+const RENDERER_HOST = "app";
+const RENDERER_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+};
+
+export interface RendererProtocol {
+  handle(
+    scheme: string,
+    handler: (request: Request) => Promise<Response>,
+  ): void;
+  registerSchemesAsPrivileged(
+    customSchemes: {
+      scheme: string;
+      privileges: {
+        corsEnabled: boolean;
+        secure: boolean;
+        standard: boolean;
+        supportFetchAPI: boolean;
+      };
+    }[],
+  ): void;
+}
+
+export const registerRendererScheme = (
+  protocol: Pick<RendererProtocol, "registerSchemesAsPrivileged">,
+): void => {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: RENDERER_SCHEME,
+      privileges: {
+        corsEnabled: false,
+        secure: true,
+        standard: true,
+        supportFetchAPI: true,
+      },
+    },
+  ]);
+};
+
+export const installRendererProtocol = (
+  protocol: Pick<RendererProtocol, "handle">,
+  rendererRoot: string,
+): void => {
+  if (!isAbsolute(rendererRoot)) {
+    throw new Error("renderer root must be absolute");
+  }
+  const trustedRoot = resolve(rendererRoot);
+  protocol.handle(RENDERER_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url);
+      if (
+        url.protocol !== `${RENDERER_SCHEME}:` ||
+        url.hostname !== RENDERER_HOST ||
+        url.username.length > 0 ||
+        url.password.length > 0 ||
+        url.port.length > 0 ||
+        url.search.length > 0 ||
+        url.hash.length > 0
+      ) {
+        return new Response(null, { status: 404 });
+      }
+      const pathname = decodeURIComponent(url.pathname);
+      if (pathname.includes("\0")) {
+        return new Response(null, { status: 404 });
+      }
+      const candidate = resolve(trustedRoot, `.${pathname}`);
+      const child = relative(trustedRoot, candidate);
+      const contentType = RENDERER_CONTENT_TYPES[extname(candidate)];
+      if (
+        child.length === 0 ||
+        child.startsWith("..") ||
+        isAbsolute(child) ||
+        contentType === undefined
+      ) {
+        return new Response(null, { status: 404 });
+      }
+      return new Response(await readFile(candidate), {
+        headers: {
+          "Content-Type": contentType,
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+};
+
+export const resolveRendererAssetUrl = (): string =>
+  `${RENDERER_SCHEME}://${RENDERER_HOST}/index.html`;
 
 interface QuitEvent {
   preventDefault(): void;
@@ -292,15 +385,23 @@ export const bindApplicationLifecycle = (
 };
 
 const boot = async (): Promise<void> => {
-  const { app, BrowserWindow, dialog, ipcMain, session } =
+  const { app, BrowserWindow, dialog, ipcMain, protocol, session } =
     await import("electron");
+  registerRendererScheme(protocol);
   await app.whenReady();
   installSessionSecurity(session.defaultSession);
-  const rendererUrl =
+  const developmentRendererUrl =
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "string" &&
     MAIN_WINDOW_VITE_DEV_SERVER_URL.length > 0
       ? MAIN_WINDOW_VITE_DEV_SERVER_URL
-      : resolveRendererAssetUrl(__dirname, MAIN_WINDOW_VITE_NAME);
+      : undefined;
+  if (developmentRendererUrl === undefined) {
+    installRendererProtocol(
+      protocol,
+      join(app.getAppPath(), ".vite", "renderer", MAIN_WINDOW_VITE_NAME),
+    );
+  }
+  const rendererUrl = developmentRendererUrl ?? resolveRendererAssetUrl();
   const window = await createViewerWindow({
     BrowserWindow,
     preloadPath: join(__dirname, "preload.js"),
@@ -344,3 +445,4 @@ if (process.versions.electron !== undefined) {
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
+declare const NETFT_VIEWER_E2E_BUILD: boolean;

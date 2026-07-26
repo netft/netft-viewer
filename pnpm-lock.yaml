@@ -20,9 +20,18 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      scheduler:
+        specifier: 0.27.0
+        version: 0.27.0
+      tslib:
+        specifier: 2.3.0
+        version: 2.3.0
       zod:
         specifier: 4.4.3
         version: 4.4.3
+      zrender:
+        specifier: 6.1.0
+        version: 6.1.0
     devDependencies:
       '@electron-forge/cli':
         specifier: 7.11.2

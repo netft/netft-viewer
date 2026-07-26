@@ -13,19 +13,9 @@ import type {
   ViewerPreferences,
 } from "./settings-store";
 import { SensorHostSchema } from "./settings-store";
+import { IPC_CHANNELS } from "../shared/ipc-channels";
 
-export const IPC_CHANNELS = {
-  connect: "netft:connect",
-  disconnect: "netft:disconnect",
-  setPaused: "netft:set-paused",
-  requestBias: "netft:request-bias",
-  startRecording: "netft:start-recording",
-  stopRecording: "netft:stop-recording",
-  retryBackend: "netft:retry-backend",
-  getPreferences: "netft:get-preferences",
-  updatePreferences: "netft:update-preferences",
-  event: "netft:event",
-} as const;
+export { IPC_CHANNELS } from "../shared/ipc-channels";
 
 type IpcHandler = (
   event: IpcInvokeEventLike,

@@ -8,7 +8,7 @@ import type {
   CommandResult,
   RendererEvent,
 } from "../main/companion-supervisor";
-import { IPC_CHANNELS } from "../main/ipc-handlers";
+import { IPC_CHANNELS } from "../shared/ipc-channels";
 import type {
   PreferencesPatch,
   ViewerPreferences,

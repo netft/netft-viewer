@@ -13,7 +13,9 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "test/electron/**/*.ts",
+    "test/e2e/**/*.ts",
     "forge.config.ts",
+    "playwright.config.ts",
     "vite.*.config.ts",
     "vitest.config.ts"
   ]

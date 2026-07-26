@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -19,7 +20,9 @@ import {
   bindApplicationLifecycle,
   CONTENT_SECURITY_POLICY,
   createViewerWindow,
+  installRendererProtocol,
   installSessionSecurity,
+  registerRendererScheme,
   resolveCompanionExecutable,
   resolveRendererAssetUrl,
   type BrowserWindowLike,
@@ -230,14 +233,59 @@ describe("Electron window security", () => {
     );
   });
 
-  it("encodes the packaged renderer URL without string-built file paths", () => {
-    const buildDirectory = resolve("path with spaces", ".vite", "build");
+  it("uses a fixed local renderer origin for packaged assets", () => {
+    expect(resolveRendererAssetUrl()).toBe("netft-viewer://app/index.html");
+  });
 
-    expect(resolveRendererAssetUrl(buildDirectory, "main_window")).toBe(
-      pathToFileURL(
-        join(buildDirectory, "..", "renderer", "main_window", "index.html"),
-      ).toString(),
+  it("registers a secure standard renderer scheme before use", () => {
+    const protocol = {
+      registerSchemesAsPrivileged: vi.fn(),
+    };
+
+    registerRendererScheme(protocol);
+
+    expect(protocol.registerSchemesAsPrivileged).toHaveBeenCalledWith([
+      {
+        scheme: "netft-viewer",
+        privileges: {
+          corsEnabled: false,
+          secure: true,
+          standard: true,
+          supportFetchAPI: true,
+        },
+      },
+    ]);
+  });
+
+  it("serves only allowlisted renderer files below the fixed root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "netft-renderer-protocol-"));
+    await writeFile(join(root, "index.html"), "<main></main>", "utf8");
+    await writeFile(join(root, "asset.js"), "export {};", "utf8");
+    await writeFile(join(root, "data.json"), "{}", "utf8");
+    let handler: ((request: Request) => Promise<Response>) | undefined;
+    installRendererProtocol(
+      {
+        handle: vi.fn((_scheme, registered) => {
+          handler = registered;
+        }),
+      },
+      root,
     );
+
+    const index = await handler?.(new Request("netft-viewer://app/index.html"));
+    expect(index?.status).toBe(200);
+    expect(await index?.text()).toBe("<main></main>");
+    expect(index?.headers.get("content-type")).toBe("text/html; charset=utf-8");
+
+    for (const url of [
+      "netft-viewer://foreign/index.html",
+      "netft-viewer://app/data.json",
+      "netft-viewer://app/%2e%2e%2foutside.js",
+      "netft-viewer://app/missing.js",
+    ]) {
+      expect((await handler?.(new Request(url)))?.status).toBe(404);
+    }
+    await rm(root, { force: true, recursive: true });
   });
 });
 

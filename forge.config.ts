@@ -2,9 +2,16 @@ import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
+const e2eBuild = process.env.NETFT_VIEWER_E2E_BUILD === "true";
+
 const config = {
   packagerConfig: {
     asar: true,
+    ...(e2eBuild
+      ? {
+          extraResource: ["test/support/fake-companion.mjs"],
+        }
+      : {}),
   },
   plugins: [
     new VitePlugin({
@@ -32,7 +39,7 @@ const config = {
       [FuseV1Options.RunAsNode]: false,
       [FuseV1Options.EnableCookieEncryption]: true,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      [FuseV1Options.EnableNodeCliInspectArguments]: e2eBuild,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
       [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false,
