@@ -239,6 +239,32 @@ TEST(ViewerSessionTest, PauseDrainsRecordingAndDoesNotReplayMeasurements) {
   EXPECT_EQ(session.snapshot().recording.accepted_samples, 2U);
 }
 
+TEST(ViewerSessionTest, PublishesPeriodicProgressWhileRecording) {
+  netft::test::FakeSensor sensor;
+  CapturingSink sink;
+  auto writer = std::make_shared<test::ControlledWriterState>();
+  auto recorder = std::make_shared<Recorder>(
+      RecorderOptions{}, nullptr,
+      std::make_shared<test::ControlledRecorderStorage>(writer));
+  ViewerSession session(sink.channel(), options({}, recorder));
+  connect_and_stream(session, sink, sensor);
+
+  ASSERT_EQ(session.start_recording("session-progress.csv", false),
+            SessionResult::Ok);
+  sensor.send_record_now(2U, 0U, 108U);
+  ASSERT_TRUE(sink.wait([&] {
+    return std::any_of(sink.recordings.begin(), sink.recordings.end(),
+                       [](const RecorderSnapshot &snapshot) {
+                         return snapshot.state == RecordingState::Recording &&
+                                snapshot.accepted_samples > 0U;
+                       });
+  }));
+
+  const auto snapshot = session.snapshot().recording;
+  EXPECT_EQ(snapshot.state, RecordingState::Recording);
+  EXPECT_GT(snapshot.accepted_samples, 0U);
+}
+
 TEST(ViewerSessionTest, BiasIsAcceptedOnlyWhileLiveStreaming) {
   netft::test::FakeSensor sensor;
   CapturingSink sink;

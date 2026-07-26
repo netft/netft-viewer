@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
   }
   netft_viewer::companion::Companion companion{options};
   try {
-    return companion.run(std::cin, std::cout, std::cerr);
+    return companion.run_standard_io(std::cout, std::cerr);
   } catch (...) {
     std::cerr << "companion process failed\n";
     return 2;

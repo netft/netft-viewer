@@ -338,6 +338,7 @@ class CompanionProcessTest(unittest.TestCase):
                 )
                 progress, _ = companion.read_until(
                     lambda event: event["type"] == "recording_progress"
+                    and int(event["payload"]["acceptedSamples"]) > 0
                 )
                 self.assertGreater(
                     int(progress["payload"]["acceptedSamples"]), 0
@@ -388,13 +389,37 @@ class CompanionProcessTest(unittest.TestCase):
                 companion.read_until(lambda event: event["type"] == "live_wrench")
 
                 companion.send(command("stop_recording", "req-stop"))
-                stopped, _ = companion.read_until(
+                stopped, preceding = companion.read_until(
                     lambda event: event.get("requestId") == "req-stop"
                 )
                 self.assertTrue(stopped["payload"]["success"])
+                final_progress = next(
+                    (
+                        event
+                        for event in reversed(preceding)
+                        if event["type"] == "recording_progress"
+                        and int(event["payload"]["acceptedSamples"])
+                        == int(event["payload"]["writtenSamples"])
+                        and int(event["payload"]["acceptedSamples"]) > 0
+                    ),
+                    None,
+                )
+                if final_progress is None:
+                    final_progress, _ = companion.read_until(
+                        lambda event: event["type"] == "recording_progress"
+                        and int(event["payload"]["acceptedSamples"])
+                        == int(event["payload"]["writtenSamples"])
+                        and int(event["payload"]["acceptedSamples"]) > 0
+                    )
                 self.assertTrue(target.is_file())
                 self.assertFalse(Path(f"{target}.partial").exists())
-                self.assertGreater(len(target.read_text().splitlines()), 1)
+                data_rows = len(target.read_text().splitlines()) - 1
+                self.assertEqual(
+                    int(final_progress["payload"]["acceptedSamples"]), data_rows
+                )
+                self.assertEqual(
+                    int(final_progress["payload"]["writtenSamples"]), data_rows
+                )
 
                 companion.send(command("disconnect", "req-disconnect"))
                 disconnected, _ = companion.read_until(
@@ -409,48 +434,57 @@ class CompanionProcessTest(unittest.TestCase):
             executable = Path(
                 os.environ.get("NETFT_VIEWER_COMPANION", DEFAULT_COMPANION)
             )
-            process = subprocess.Popen(
-                [
-                    str(executable),
-                    f"--rdt-port={sensor.rdt_port}",
-                    f"--http-port={sensor.http_port}",
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                bufsize=1,
-            )
-            assert process.stdin is not None
-            assert process.stdout is not None
-            try:
-                process.stdin.write(command("hello", "req-hello") + "\n")
-                process.stdin.flush()
-                self.assertEqual(json.loads(process.stdout.readline())["type"], "hello")
-                process.stdin.write(
-                    command(
-                        "connect",
-                        "req-connect",
-                        payload={"sensorHost": "127.0.0.1"},
-                    )
-                    + "\n"
+            for iteration in range(5):
+                process = subprocess.Popen(
+                    [
+                        str(executable),
+                        f"--rdt-port={sensor.rdt_port}",
+                        f"--http-port={sensor.http_port}",
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    bufsize=1,
                 )
-                process.stdin.flush()
-                while True:
-                    event = json.loads(process.stdout.readline())
-                    if event.get("requestId") == "req-connect":
-                        break
-                process.stdout.close()
-                self.assertEqual(process.wait(timeout=3), 3)
-            finally:
-                if process.poll() is None:
-                    process.stdin.close()
-                    process.wait(timeout=5)
-                if process.stdin is not None and not process.stdin.closed:
-                    process.stdin.close()
-                if process.stderr is not None:
-                    process.stderr.close()
+                assert process.stdin is not None
+                assert process.stdout is not None
+                try:
+                    process.stdin.write(
+                        command("hello", f"req-hello-{iteration}") + "\n"
+                    )
+                    process.stdin.flush()
+                    self.assertEqual(
+                        json.loads(process.stdout.readline())["type"], "hello"
+                    )
+                    process.stdin.write(
+                        command(
+                            "connect",
+                            f"req-connect-{iteration}",
+                            payload={"sensorHost": "127.0.0.1"},
+                        )
+                        + "\n"
+                    )
+                    process.stdin.flush()
+                    connected = False
+                    streamed = False
+                    while not (connected and streamed):
+                        event = json.loads(process.stdout.readline())
+                        connected = connected or event.get("requestId") == (
+                            f"req-connect-{iteration}"
+                        )
+                        streamed = streamed or event["type"] == "live_wrench"
+                    process.stdout.close()
+                    self.assertEqual(process.wait(timeout=3), 3)
+                finally:
+                    if process.poll() is None:
+                        process.stdin.close()
+                        process.wait(timeout=5)
+                    if process.stdin is not None and not process.stdin.closed:
+                        process.stdin.close()
+                    if process.stderr is not None:
+                        process.stderr.close()
 
     def test_eof_finalizes_an_active_recording(self) -> None:
         with FakeSensor() as sensor, tempfile.TemporaryDirectory() as directory:

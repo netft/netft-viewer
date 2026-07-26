@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <csignal>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -34,6 +35,30 @@ protected:
   std::streamsize xsputn(const char *, std::streamsize) override { return 0; }
   int overflow(int) override { return traits_type::eof(); }
 };
+
+#ifndef _WIN32
+void preserved_signal_handler(int) {}
+
+TEST(CompanionTest, DoesNotReplaceProcessSignalHandlers) {
+  struct sigaction original{};
+  ASSERT_EQ(sigaction(SIGUSR1, nullptr, &original), 0);
+  struct sigaction expected{};
+  expected.sa_handler = preserved_signal_handler;
+  sigemptyset(&expected.sa_mask);
+  ASSERT_EQ(sigaction(SIGUSR1, &expected, nullptr), 0);
+
+  std::istringstream commands{command("shutdown", "shutdown-1")};
+  std::ostringstream events;
+  std::ostringstream logs;
+  Companion companion;
+  EXPECT_EQ(companion.run(commands, events, logs), 0);
+
+  struct sigaction actual{};
+  ASSERT_EQ(sigaction(SIGUSR1, nullptr, &actual), 0);
+  EXPECT_EQ(actual.sa_handler, preserved_signal_handler);
+  ASSERT_EQ(sigaction(SIGUSR1, &original, nullptr), 0);
+}
+#endif
 
 TEST(CompanionTest, WritesShutdownResultLastAndJoinsItsWriter) {
   std::istringstream commands{command("hello", "hello-1") +

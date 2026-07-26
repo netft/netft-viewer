@@ -1,14 +1,18 @@
 #include "netft_viewer_companion/companion.hpp"
 
+#include <array>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
-#include <csignal>
 #include <cstdint>
+#include <functional>
 #include <istream>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -17,7 +21,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <pthread.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 #endif
 
 #include "netft_viewer/session.hpp"
@@ -37,8 +43,11 @@ std::int64_t monotonic_now_ns() noexcept {
 
 class OutputWriter {
 public:
-  OutputWriter(SessionEventSink &sink, std::ostream &events)
-      : sink_(sink), events_(events), thread_(&OutputWriter::run, this) {}
+  OutputWriter(SessionEventSink &sink, std::ostream &events,
+               std::function<void()> failure_notify)
+      : sink_(sink), events_(events),
+        failure_notify_(std::move(failure_notify)),
+        thread_(&OutputWriter::run, this) {}
 
   ~OutputWriter() {
     sink_.close();
@@ -113,11 +122,13 @@ private:
       std::lock_guard<std::mutex> lock(mutex_);
       if (success) {
         completed_ticket_ = pending->ticket;
-      } else {
-        failed_ = true;
       }
     }
-    condition_.notify_all();
+    if (success) {
+      condition_.notify_all();
+    } else {
+      fail();
+    }
     return success;
   }
 
@@ -159,15 +170,23 @@ private:
   }
 
   void fail() noexcept {
+    bool notify = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      failed_ = true;
+      if (!failed_) {
+        failed_ = true;
+        notify = true;
+      }
     }
     condition_.notify_all();
+    if (notify) {
+      failure_notify_();
+    }
   }
 
   SessionEventSink &sink_;
   std::ostream &events_;
+  std::function<void()> failure_notify_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   std::optional<Pending> pending_;
@@ -178,130 +197,263 @@ private:
   std::thread thread_;
 };
 
-class InputReader {
+enum class InputStatus { Line, End, Cancelled, Failed };
+
+struct InputResult {
+  InputStatus status{InputStatus::Failed};
+  std::string value;
+  bool oversized{};
+};
+
+class LineFramer {
 public:
-  struct Line {
-    std::string value;
-    bool oversized{};
-  };
-
-  explicit InputReader(std::istream &commands) : commands_(commands) {
-#ifndef _WIN32
-    static std::once_flag signal_once;
-    std::call_once(signal_once, [] {
-      struct sigaction action{};
-      action.sa_handler = [](int) {};
-      sigemptyset(&action.sa_mask);
-      action.sa_flags = 0;
-      static_cast<void>(sigaction(SIGUSR1, &action, nullptr));
-    });
-#endif
-    thread_ = std::thread(&InputReader::run, this);
-  }
-
-  ~InputReader() {
-    stop();
-    join();
-  }
-
-  InputReader(const InputReader &) = delete;
-  InputReader &operator=(const InputReader &) = delete;
-
-  std::optional<Line> next(const OutputWriter &writer) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    for (;;) {
-      if (line_) {
-        auto result = std::move(line_);
-        line_.reset();
-        condition_.notify_all();
-        return result;
-      }
-      if (eof_ || stopping_ || writer.failed()) {
-        return std::nullopt;
-      }
-      condition_.wait_for(lock, writer_poll_interval);
+  std::optional<InputResult> push(char character) {
+    if (character == '\n') {
+      return take();
     }
-  }
-
-  void stop() noexcept {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (stopping_) {
-        return;
+    if (!oversized_) {
+      if (value_.size() < maximum_line_bytes) {
+        value_.push_back(character);
+      } else {
+        value_.clear();
+        oversized_ = true;
       }
-      stopping_ = true;
     }
-    condition_.notify_all();
-    interrupt();
+    return std::nullopt;
   }
 
-  void join() noexcept {
-    if (thread_.joinable()) {
-      thread_.join();
+  std::optional<InputResult> finish() {
+    if (value_.empty() && !oversized_) {
+      return std::nullopt;
     }
+    return take();
   }
 
 private:
-  void interrupt() noexcept {
-    if (!thread_.joinable()) {
+  InputResult take() {
+    InputResult result{InputStatus::Line, std::move(value_), oversized_};
+    value_.clear();
+    oversized_ = false;
+    return result;
+  }
+
+  std::string value_;
+  bool oversized_{};
+};
+
+class InputSource {
+public:
+  virtual ~InputSource() = default;
+  virtual InputResult next() = 0;
+  virtual void cancel() noexcept = 0;
+};
+
+class StreamInputSource final : public InputSource {
+public:
+  explicit StreamInputSource(std::istream &commands) : commands_(commands) {}
+
+  InputResult next() override {
+    char character{};
+    while (!cancelled_.load(std::memory_order_acquire) &&
+           commands_.get(character)) {
+      if (auto line = framer_.push(character)) {
+        return std::move(*line);
+      }
+    }
+    if (cancelled_.load(std::memory_order_acquire)) {
+      return {InputStatus::Cancelled, {}, false};
+    }
+    if (auto line = framer_.finish()) {
+      return std::move(*line);
+    }
+    return {
+        commands_.eof() ? InputStatus::End : InputStatus::Failed, {}, false};
+  }
+
+  void cancel() noexcept override {
+    cancelled_.store(true, std::memory_order_release);
+  }
+
+private:
+  std::istream &commands_;
+  LineFramer framer_;
+  std::atomic<bool> cancelled_{false};
+};
+
+class NativeStdinSource final : public InputSource {
+public:
+#ifdef _WIN32
+  NativeStdinSource() : input_(GetStdHandle(STD_INPUT_HANDLE)) {}
+#else
+  NativeStdinSource() {
+    if (pipe(wake_) != 0) {
+      throw std::runtime_error("failed to create stdin cancellation pipe");
+    }
+    for (const auto descriptor : wake_) {
+      const auto flags = fcntl(descriptor, F_GETFL, 0);
+      const auto descriptor_flags = fcntl(descriptor, F_GETFD, 0);
+      if (flags < 0 || descriptor_flags < 0 ||
+          fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0 ||
+          fcntl(descriptor, F_SETFD, descriptor_flags | FD_CLOEXEC) < 0) {
+        close(wake_[0]);
+        close(wake_[1]);
+        throw std::runtime_error("failed to configure stdin cancellation pipe");
+      }
+    }
+  }
+
+  ~NativeStdinSource() override {
+    close(wake_[0]);
+    close(wake_[1]);
+  }
+#endif
+
+  InputResult next() override {
+    for (;;) {
+      if (cancelled_.load(std::memory_order_acquire)) {
+        return {InputStatus::Cancelled, {}, false};
+      }
+      while (offset_ < buffered_) {
+        if (auto line = framer_.push(buffer_[offset_++])) {
+          return std::move(*line);
+        }
+      }
+      if (eof_) {
+        if (auto line = framer_.finish()) {
+          return std::move(*line);
+        }
+        return {InputStatus::End, {}, false};
+      }
+      const auto status = fill();
+      if (status != InputStatus::Line) {
+        return {status, {}, false};
+      }
+    }
+  }
+
+  void cancel() noexcept override {
+    if (cancelled_.exchange(true, std::memory_order_acq_rel)) {
       return;
     }
 #ifdef _WIN32
-    static_cast<void>(CancelSynchronousIo(thread_.native_handle()));
+    condition_.notify_all();
 #else
-    static_cast<void>(pthread_kill(thread_.native_handle(), SIGUSR1));
+    constexpr char wake = 1;
+    const auto ignored = write(wake_[1], &wake, sizeof(wake));
+    static_cast<void>(ignored);
 #endif
   }
 
-  void publish(Line line) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    condition_.wait(lock, [&] { return !line_ || stopping_; });
-    if (!stopping_) {
-      line_.emplace(std::move(line));
+private:
+  InputStatus fill() noexcept {
+    offset_ = 0;
+    buffered_ = 0;
+#ifdef _WIN32
+    if (input_ == nullptr || input_ == INVALID_HANDLE_VALUE) {
+      return InputStatus::Failed;
     }
-    condition_.notify_all();
-  }
-
-  void run() noexcept {
-    Line line;
-    char character{};
-    while (!is_stopping() && commands_.get(character)) {
-      if (character == '\n') {
-        publish(std::move(line));
-        line = {};
-        continue;
-      }
-      if (!line.oversized) {
-        if (line.value.size() < maximum_line_bytes) {
-          line.value.push_back(character);
-        } else {
-          line.value.clear();
-          line.oversized = true;
+    const auto type = GetFileType(input_);
+    if (type == FILE_TYPE_PIPE) {
+      DWORD available{};
+      if (!PeekNamedPipe(input_, nullptr, 0, nullptr, &available, nullptr)) {
+        const auto error = GetLastError();
+        if (error == ERROR_BROKEN_PIPE) {
+          eof_ = true;
+          return InputStatus::Line;
         }
+        return InputStatus::Failed;
+      }
+      if (available == 0) {
+        std::unique_lock<std::mutex> lock(wait_mutex_);
+        condition_.wait_for(lock, writer_poll_interval, [&] {
+          return cancelled_.load(std::memory_order_acquire);
+        });
+        return cancelled_.load(std::memory_order_acquire)
+                   ? InputStatus::Cancelled
+                   : InputStatus::Line;
+      }
+    } else if (type == FILE_TYPE_CHAR) {
+      const auto wait = WaitForSingleObject(
+          input_, static_cast<DWORD>(writer_poll_interval.count()));
+      if (wait == WAIT_TIMEOUT) {
+        return cancelled_.load(std::memory_order_acquire)
+                   ? InputStatus::Cancelled
+                   : InputStatus::Line;
+      }
+      if (wait != WAIT_OBJECT_0) {
+        return InputStatus::Failed;
       }
     }
-    if (!is_stopping() && (!line.value.empty() || line.oversized)) {
-      publish(std::move(line));
+
+    DWORD read{};
+    if (!ReadFile(input_, buffer_.data(), static_cast<DWORD>(buffer_.size()),
+                  &read, nullptr)) {
+      const auto error = GetLastError();
+      if (error == ERROR_BROKEN_PIPE || error == ERROR_HANDLE_EOF) {
+        eof_ = true;
+        return InputStatus::Line;
+      }
+      return InputStatus::Failed;
     }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
+    if (read == 0) {
       eof_ = true;
+    } else {
+      buffered_ = static_cast<std::size_t>(read);
     }
-    condition_.notify_all();
+    return InputStatus::Line;
+#else
+    pollfd descriptors[2] = {
+        {STDIN_FILENO, POLLIN, 0},
+        {wake_[0], POLLIN, 0},
+    };
+    int poll_result{};
+    do {
+      poll_result = poll(descriptors, 2, -1);
+    } while (poll_result < 0 && errno == EINTR);
+    if (poll_result < 0) {
+      return InputStatus::Failed;
+    }
+    if ((descriptors[1].revents & POLLIN) != 0 ||
+        cancelled_.load(std::memory_order_acquire)) {
+      return InputStatus::Cancelled;
+    }
+    if ((descriptors[0].revents & (POLLIN | POLLHUP)) != 0) {
+      ssize_t read_count{};
+      do {
+        read_count = read(STDIN_FILENO, buffer_.data(), buffer_.size());
+      } while (read_count < 0 && errno == EINTR);
+      if (read_count > 0) {
+        buffered_ = static_cast<std::size_t>(read_count);
+        return InputStatus::Line;
+      }
+      if (read_count == 0) {
+        eof_ = true;
+        return InputStatus::Line;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        return InputStatus::Line;
+      }
+      return InputStatus::Failed;
+    }
+    return (descriptors[0].revents & (POLLERR | POLLNVAL)) != 0
+               ? InputStatus::Failed
+               : InputStatus::Line;
+#endif
   }
 
-  [[nodiscard]] bool is_stopping() const noexcept {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return stopping_;
-  }
-
-  std::istream &commands_;
-  mutable std::mutex mutex_;
-  std::condition_variable condition_;
-  std::optional<Line> line_;
-  bool stopping_{};
+  LineFramer framer_;
+  std::array<char, 4096> buffer_{};
+  std::size_t offset_{};
+  std::size_t buffered_{};
   bool eof_{};
-  std::thread thread_;
+  std::atomic<bool> cancelled_{false};
+#ifdef _WIN32
+  HANDLE input_;
+  std::mutex wait_mutex_;
+  std::condition_variable condition_;
+#else
+  int wake_[2]{-1, -1};
+#endif
 };
 
 } // namespace
@@ -311,28 +463,40 @@ public:
   explicit Impl(CompanionOptions options) : options_(options) {}
 
   int run(std::istream &commands, std::ostream &events, std::ostream &logs) {
+    StreamInputSource source(commands);
+    return run(source, events, logs);
+  }
+
+  int run_standard_io(std::ostream &events, std::ostream &logs) {
+    NativeStdinSource source;
+    return run(source, events, logs);
+  }
+
+private:
+  int run(InputSource &source, std::ostream &events, std::ostream &logs) {
     SessionEventSink sink;
     auto session = std::make_unique<ViewerSession>(sink);
-    OutputWriter writer(sink, events);
-    InputReader reader(commands);
+    OutputWriter writer(sink, events, [&] { source.cancel(); });
     int result = 0;
 
     for (;;) {
-      auto input = reader.next(writer);
-      if (!input) {
-        if (writer.failed()) {
-          result = 3;
+      auto input = source.next();
+      if (input.status != InputStatus::Line) {
+        if (writer.failed() || input.status == InputStatus::Cancelled) {
+          result = writer.failed() ? 3 : result;
+        } else if (input.status == InputStatus::Failed) {
+          logs << "companion command input failed\n";
+          result = 2;
         }
         break;
       }
       try {
-        if (input->oversized) {
+        if (input.oversized) {
           throw ProtocolError("protocol line exceeds byte limit");
         }
-        auto parsed = parse_command(input->value);
+        auto parsed = parse_command(input.value);
         if (const auto *shutdown = std::get_if<ShutdownCommand>(&parsed)) {
-          reader.stop();
-          reader.join();
+          source.cancel();
           auto session_result = SessionResult::Failed;
           try {
             session_result = session->disconnect();
@@ -366,9 +530,9 @@ public:
           break;
         }
       } catch (const ProtocolError &) {
-        const auto context = input->oversized
+        const auto context = input.oversized
                                  ? std::nullopt
-                                 : recover_request_context(input->value);
+                                 : recover_request_context(input.value);
         std::optional<SerializedEvent> response;
         if (context && context->command_type) {
           response = serialize_event(CommandResultEvent{
@@ -397,8 +561,7 @@ public:
       logs.flush();
     }
 
-    reader.stop();
-    reader.join();
+    source.cancel();
     session.reset();
     sink.close();
     writer.close();
@@ -409,7 +572,6 @@ public:
     return result;
   }
 
-private:
   static std::string_view command_name(const Command &command) {
     return std::visit(
         [](const auto &value) -> std::string_view {
@@ -505,6 +667,10 @@ Companion::~Companion() = default;
 int Companion::run(std::istream &commands, std::ostream &events,
                    std::ostream &logs) {
   return impl_->run(commands, events, logs);
+}
+
+int Companion::run_standard_io(std::ostream &events, std::ostream &logs) {
+  return impl_->run_standard_io(events, logs);
 }
 
 } // namespace netft_viewer::companion

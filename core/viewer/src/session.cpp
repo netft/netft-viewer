@@ -614,7 +614,7 @@ private:
       events_.push(generation, *changed_configuration);
     }
     events_.push(generation, std::move(health));
-    publish_recording(generation);
+    publish_periodic_recording(generation);
 
     if (recorder_->snapshot().state == RecordingState::Error &&
         !recording_failure_reported_.exchange(true,
@@ -643,6 +643,13 @@ private:
 
   void publish_recording(std::uint64_t generation) {
     events_.push(generation, recorder_->snapshot());
+  }
+
+  void publish_periodic_recording(std::uint64_t generation) {
+    auto snapshot = recorder_->snapshot();
+    if (snapshot.state != RecordingState::Idle) {
+      events_.push(generation, std::move(snapshot));
+    }
   }
 
   void publish_error(std::uint64_t generation, SessionOperation operation,

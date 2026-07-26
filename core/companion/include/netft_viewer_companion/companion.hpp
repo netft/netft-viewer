@@ -19,6 +19,7 @@ public:
   Companion &operator=(const Companion &) = delete;
 
   int run(std::istream &commands, std::ostream &events, std::ostream &logs);
+  int run_standard_io(std::ostream &events, std::ostream &logs);
 
 private:
   class Impl;
