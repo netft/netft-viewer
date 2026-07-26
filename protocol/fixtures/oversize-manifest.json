@@ -1,0 +1,5 @@
+{
+  "limitBytes": 1048576,
+  "commandPaddingBytes": 1048576,
+  "eventPaddingBytes": 1048576
+}

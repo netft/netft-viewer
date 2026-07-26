@@ -7,9 +7,18 @@
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "check:versions": "node tools/check-versions.mjs",
-    "test:project": "node --test test/project/version.test.mjs"
+    "test:project": "node --test test/project/version.test.mjs",
+    "test:protocol": "vitest run test/electron/protocol.test.ts"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "pnpm": "11.17.0"
+    "@types/node": "24.13.3",
+    "ajv": "8.17.1",
+    "pnpm": "11.17.0",
+    "prettier": "3.9.6",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

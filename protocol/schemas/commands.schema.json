@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netft.dev/schemas/viewer/commands.schema.json",
+  "title": "Net F/T Viewer companion commands",
+  "$defs": {
+    "protocol": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "decimalNs": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "format": "int64-decimal"
+    },
+    "base": {
+      "type": "object",
+      "required": ["protocol", "type", "requestId", "monotonicNs", "payload"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "type": "string" },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
+        "monotonicNs": { "$ref": "#/$defs/decimalNs" },
+        "payload": { "type": "object" }
+      }
+    }
+  },
+  "allOf": [
+    { "$ref": "#/$defs/base" },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "type": { "const": "hello" },
+            "payload": { "type": "object" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "connect" },
+            "payload": {
+              "type": "object",
+              "required": ["sensorHost"],
+              "properties": {
+                "sensorHost": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253,
+                  "format": "sensor-host"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "disconnect" },
+            "payload": { "type": "object" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "set_paused" },
+            "payload": {
+              "type": "object",
+              "required": ["paused"],
+              "properties": { "paused": { "type": "boolean" } }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "bias" },
+            "payload": { "type": "object" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "start_recording" },
+            "payload": {
+              "type": "object",
+              "required": ["targetPath", "overwrite"],
+              "properties": {
+                "targetPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32768
+                },
+                "overwrite": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "stop_recording" },
+            "payload": { "type": "object" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "shutdown" },
+            "payload": { "type": "object" }
+          }
+        }
+      ]
+    }
+  ]
+}

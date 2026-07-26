@@ -1,0 +1,6 @@
+{"protocol":{"major":1,"minor":0},"type":"health","monotonicNs":"1"}
+{"protocol":{"major":2,"minor":0},"type":"error","monotonicNs":"2","payload":{"operation":"sensor","message":"x","sequence":"1","droppedBefore":"0"}}
+{"protocol":{"major":1,"minor":0},"type":"future_event","monotonicNs":"3","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"recording_progress","monotonicNs":"4","payload":{"acceptedSamples":"01","writtenSamples":"0","bytesWritten":"0","queueSize":"0","queueCapacity":"65536"}}
+{"protocol":{"major":1,"minor":0},"type":"plot_batch","monotonicNs":"5","payload":{"axes":[{"axis":"Fx","points":[{"hostTimeNs":"1","value":1},{"hostTimeNs":"2","value":2},{"hostTimeNs":"3","value":3},{"hostTimeNs":"4","value":4},{"hostTimeNs":"5","value":5}]},{"axis":"Fy","points":[]},{"axis":"Fz","points":[]},{"axis":"Tx","points":[]},{"axis":"Ty","points":[]},{"axis":"Tz","points":[]}]}}
+{"protocol":{"major":1,"minor":0},"type":"plot_batch","monotonicNs":"6","payload":{"axes":[{"axis":"Fx","points":[]},{"axis":"Fx","points":[]},{"axis":"Fz","points":[]},{"axis":"Tx","points":[]},{"axis":"Ty","points":[]},{"axis":"Tz","points":[]}]}}
