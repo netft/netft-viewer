@@ -1,4 +1,4 @@
-#include "detail/posix_transport.hpp"
+#include "detail/udp_transport.hpp"
 
 #include <netdb.h>
 #include <poll.h>
@@ -15,7 +15,8 @@ namespace netft::detail {
 namespace {
 
 std::runtime_error socket_error(const char *operation) {
-  return std::runtime_error(std::string{operation} + ": " + std::strerror(errno));
+  return std::runtime_error(std::string{operation} + ": " +
+                            std::strerror(errno));
 }
 
 int timeout_milliseconds(const std::chrono::duration<double> timeout) {
@@ -26,30 +27,37 @@ int timeout_milliseconds(const std::chrono::duration<double> timeout) {
   return static_cast<int>(milliseconds);
 }
 
+constexpr std::uintptr_t kInvalidSocket = ~std::uintptr_t{0};
+
 } // namespace
 
-PosixTransport::~PosixTransport() { close(); }
+UdpTransport::~UdpTransport() { close(); }
 
-void PosixTransport::connect(const std::string &host, const int port) {
+void UdpTransport::connect(const std::string &host, const int port) {
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_DGRAM;
   addrinfo *addresses = nullptr;
   const auto service = std::to_string(port);
-  const int result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
+  const int result =
+      ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
   if (result != 0) {
-    throw std::runtime_error(std::string{"failed to resolve sensor: "} + ::gai_strerror(result));
+    throw std::runtime_error(std::string{"failed to resolve sensor: "} +
+                             ::gai_strerror(result));
   }
 
   int connected_socket = -1;
   int last_error = 0;
-  for (auto *address = addresses; address != nullptr; address = address->ai_next) {
-    connected_socket = ::socket(address->ai_family, address->ai_socktype, address->ai_protocol);
+  for (auto *address = addresses; address != nullptr;
+       address = address->ai_next) {
+    connected_socket = ::socket(address->ai_family, address->ai_socktype,
+                                address->ai_protocol);
     if (connected_socket < 0) {
       last_error = errno;
       continue;
     }
-    if (::connect(connected_socket, address->ai_addr, address->ai_addrlen) == 0) {
+    if (::connect(connected_socket, address->ai_addr, address->ai_addrlen) ==
+        0) {
       break;
     }
     last_error = errno;
@@ -64,18 +72,20 @@ void PosixTransport::connect(const std::string &host, const int port) {
   }
 
   std::scoped_lock lock(mutex_);
-  if (socket_ >= 0) {
-    ::close(socket_);
+  if (socket_ != kInvalidSocket) {
+    ::close(static_cast<int>(socket_));
   }
-  socket_ = connected_socket;
+  socket_ = static_cast<std::uintptr_t>(connected_socket);
+  shutdown_requested_ = false;
 }
 
-void PosixTransport::send(const std::array<std::uint8_t, 8> &request) {
+void UdpTransport::send(const std::array<std::uint8_t, 8> request) {
   std::scoped_lock lock(mutex_);
-  if (socket_ < 0) {
+  if (socket_ == kInvalidSocket) {
     throw std::runtime_error("UDP socket is not connected");
   }
-  const auto sent = ::send(socket_, request.data(), request.size(), 0);
+  const auto sent =
+      ::send(static_cast<int>(socket_), request.data(), request.size(), 0);
   if (sent < 0) {
     throw socket_error("failed to send UDP request");
   }
@@ -84,15 +94,19 @@ void PosixTransport::send(const std::array<std::uint8_t, 8> &request) {
   }
 }
 
-std::size_t PosixTransport::receive(std::uint8_t *data, const std::size_t capacity,
-                                    const std::chrono::duration<double> timeout) {
+std::size_t UdpTransport::receive(std::uint8_t *data,
+                                  const std::size_t capacity,
+                                  const std::chrono::duration<double> timeout) {
   int socket = -1;
   {
     std::scoped_lock lock(mutex_);
-    socket = socket_;
-  }
-  if (socket < 0) {
-    throw std::runtime_error("UDP socket is not connected");
+    if (socket_ == kInvalidSocket) {
+      throw std::runtime_error("UDP socket is not connected");
+    }
+    if (shutdown_requested_) {
+      return 0;
+    }
+    socket = static_cast<int>(socket_);
   }
 
   pollfd descriptor{socket, POLLIN, 0};
@@ -117,6 +131,12 @@ std::size_t PosixTransport::receive(std::uint8_t *data, const std::size_t capaci
   if (poll_result == 0) {
     return 0;
   }
+  {
+    std::scoped_lock lock(mutex_);
+    if (shutdown_requested_) {
+      return 0;
+    }
+  }
   if ((descriptor.revents & POLLNVAL) != 0) {
     throw std::runtime_error("UDP socket became invalid");
   }
@@ -131,18 +151,20 @@ std::size_t PosixTransport::receive(std::uint8_t *data, const std::size_t capaci
   return static_cast<std::size_t>(received);
 }
 
-void PosixTransport::shutdown() noexcept {
+void UdpTransport::shutdown() noexcept {
   std::scoped_lock lock(mutex_);
-  if (socket_ >= 0) {
-    static_cast<void>(::shutdown(socket_, SHUT_RDWR));
+  shutdown_requested_ = true;
+  if (socket_ != kInvalidSocket) {
+    static_cast<void>(::shutdown(static_cast<int>(socket_), SHUT_RDWR));
   }
 }
 
-void PosixTransport::close() noexcept {
+void UdpTransport::close() noexcept {
   std::scoped_lock lock(mutex_);
-  if (socket_ >= 0) {
-    ::close(socket_);
-    socket_ = -1;
+  shutdown_requested_ = true;
+  if (socket_ != kInvalidSocket) {
+    ::close(static_cast<int>(socket_));
+    socket_ = kInvalidSocket;
   }
 }
 

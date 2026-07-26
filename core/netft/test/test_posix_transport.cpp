@@ -1,4 +1,4 @@
-#include "detail/posix_transport.hpp"
+#include "detail/udp_transport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -47,7 +47,8 @@ void reset_behaviors() {
 
 } // namespace
 
-extern "C" int __wrap_poll(pollfd *descriptors, const nfds_t count, const int timeout) {
+extern "C" int __wrap_poll(pollfd *descriptors, const nfds_t count,
+                           const int timeout) {
   poll_timeouts.push_back(timeout);
   switch (poll_behavior) {
   case PollBehavior::Error:
@@ -84,7 +85,8 @@ extern "C" int __wrap_poll(pollfd *descriptors, const nfds_t count, const int ti
   return 0;
 }
 
-extern "C" ssize_t __wrap_send(int, const void *, const std::size_t length, int) {
+extern "C" ssize_t __wrap_send(int, const void *, const std::size_t length,
+                               int) {
   if (send_behavior == SendBehavior::Error) {
     errno = EIO;
     return -1;
@@ -114,13 +116,14 @@ TEST(PosixTransportTest, RepeatedEintrPreservesOriginalTimeout) {
   reset_behaviors();
   poll_behavior = PollBehavior::RepeatedEintrThenTimeout;
 
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
 
   EXPECT_EQ(transport.receive(buffer.data(), buffer.size(), 100ms), 0U);
 
-  ASSERT_EQ(poll_timeouts.size(), static_cast<std::size_t>(kInterruptCount + 1));
+  ASSERT_EQ(poll_timeouts.size(),
+            static_cast<std::size_t>(kInterruptCount + 1));
   for (std::size_t index = 1; index < poll_timeouts.size(); ++index) {
     EXPECT_LT(poll_timeouts[index], poll_timeouts[index - 1]);
   }
@@ -130,11 +133,12 @@ TEST(PosixTransportTest, NonEintrPollErrorStillThrows) {
   reset_behaviors();
   poll_behavior = PollBehavior::Error;
 
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
 
-  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 100ms), std::runtime_error);
+  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 100ms),
+               std::runtime_error);
   EXPECT_EQ(poll_timeouts.size(), 1U);
 }
 
@@ -142,7 +146,7 @@ TEST(PosixTransportTest, ExpiredDeadlineDoesNotRepoll) {
   reset_behaviors();
   poll_behavior = PollBehavior::EintrPastDeadline;
 
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
 
@@ -152,22 +156,23 @@ TEST(PosixTransportTest, ExpiredDeadlineDoesNotRepoll) {
 
 TEST(PosixTransportTest, SendBeforeConnectThrows) {
   reset_behaviors();
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   std::array<std::uint8_t, 8> request{};
   EXPECT_THROW(transport.send(request), std::runtime_error);
 }
 
 TEST(PosixTransportTest, ReceiveBeforeConnectThrows) {
   reset_behaviors();
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   std::array<std::uint8_t, 36> buffer{};
-  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms), std::runtime_error);
+  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms),
+               std::runtime_error);
 }
 
 TEST(PosixTransportTest, SendErrorThrows) {
   reset_behaviors();
   send_behavior = SendBehavior::Error;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 8> request{};
   EXPECT_THROW(transport.send(request), std::runtime_error);
@@ -176,7 +181,7 @@ TEST(PosixTransportTest, SendErrorThrows) {
 TEST(PosixTransportTest, ShortSendThrows) {
   reset_behaviors();
   send_behavior = SendBehavior::ShortWrite;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 8> request{};
   EXPECT_THROW(transport.send(request), std::runtime_error);
@@ -185,17 +190,18 @@ TEST(PosixTransportTest, ShortSendThrows) {
 TEST(PosixTransportTest, InvalidPollDescriptorThrows) {
   reset_behaviors();
   poll_behavior = PollBehavior::InvalidDescriptor;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
-  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms), std::runtime_error);
+  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms),
+               std::runtime_error);
 }
 
 TEST(PosixTransportTest, InterruptedReceiveReturnsZero) {
   reset_behaviors();
   poll_behavior = PollBehavior::Readable;
   receive_behavior = ReceiveBehavior::Interrupted;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
   EXPECT_EQ(transport.receive(buffer.data(), buffer.size(), 20ms), 0U);
@@ -205,17 +211,18 @@ TEST(PosixTransportTest, ReceiveErrorThrows) {
   reset_behaviors();
   poll_behavior = PollBehavior::Readable;
   receive_behavior = ReceiveBehavior::Error;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
-  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms), std::runtime_error);
+  EXPECT_THROW(transport.receive(buffer.data(), buffer.size(), 20ms),
+               std::runtime_error);
 }
 
 TEST(PosixTransportTest, ReadableDatagramReturnsPayloadSize) {
   reset_behaviors();
   poll_behavior = PollBehavior::Readable;
   receive_behavior = ReceiveBehavior::Payload;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
   EXPECT_EQ(transport.receive(buffer.data(), buffer.size(), 20ms), 4U);
@@ -224,7 +231,7 @@ TEST(PosixTransportTest, ReadableDatagramReturnsPayloadSize) {
 TEST(PosixTransportTest, LargeTimeoutSaturatesPollMilliseconds) {
   reset_behaviors();
   poll_behavior = PollBehavior::Timeout;
-  netft::detail::PosixTransport transport;
+  netft::detail::UdpTransport transport;
   transport.connect("127.0.0.1", 49152);
   std::array<std::uint8_t, 36> buffer{};
   const auto timeout = std::chrono::duration<double>{

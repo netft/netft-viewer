@@ -10,9 +10,9 @@
 #include <thread>
 
 #include "detail/fault_latch.hpp"
-#include "detail/posix_transport.hpp"
 #include "detail/protocol.hpp"
 #include "detail/sequence.hpp"
+#include "detail/udp_transport.hpp"
 #include "netft/client.hpp"
 
 namespace netft {
@@ -86,7 +86,7 @@ private:
   std::thread::id active_worker_id_;
   bool joining_{false};
   SampleCallback callback_;
-  detail::PosixTransport transport_;
+  detail::UdpTransport transport_;
   detail::RdtSequenceTracker rdt_sequence_;
   detail::FtSequenceTracker ft_sequence_;
   std::atomic<bool> stopping_{false};

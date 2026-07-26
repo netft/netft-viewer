@@ -37,22 +37,38 @@ target_link_libraries(netft_fault_latch PRIVATE netft_viewer_netft ${NETFT_GTEST
 
 add_test(NAME netft_fault_latch COMMAND netft_fault_latch)
 
-add_executable(netft_posix_transport
-  test_posix_transport.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/posix_transport.cpp
-)
-target_compile_features(netft_posix_transport PRIVATE cxx_std_17)
-target_include_directories(netft_posix_transport PRIVATE
+if(NOT WIN32)
+  add_executable(netft_posix_transport
+    test_posix_transport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/udp_transport_posix.cpp
+  )
+  target_compile_features(netft_posix_transport PRIVATE cxx_std_17)
+  target_include_directories(netft_posix_transport PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+  )
+  target_link_options(netft_posix_transport PRIVATE
+    "-Wl,--wrap=poll"
+    "-Wl,--wrap=recv"
+    "-Wl,--wrap=send"
+  )
+  target_link_libraries(netft_posix_transport PRIVATE ${NETFT_GTEST_MAIN_TARGET})
+
+  add_test(NAME netft_posix_transport COMMAND netft_posix_transport)
+endif()
+
+add_executable(netft_udp_transport test_udp_transport.cpp)
+target_include_directories(netft_udp_transport PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
-target_link_options(netft_posix_transport PRIVATE
-  "-Wl,--wrap=poll"
-  "-Wl,--wrap=recv"
-  "-Wl,--wrap=send"
+target_link_libraries(netft_udp_transport PRIVATE
+  netft_viewer_netft
+  ${NETFT_GTEST_MAIN_TARGET}
 )
-target_link_libraries(netft_posix_transport PRIVATE ${NETFT_GTEST_MAIN_TARGET})
+if(WIN32)
+  target_link_libraries(netft_udp_transport PRIVATE ws2_32)
+endif()
 
-add_test(NAME netft_posix_transport COMMAND netft_posix_transport)
+add_test(NAME netft_udp_transport COMMAND netft_udp_transport)
 
 add_executable(netft_discovery
   test_discovery.cpp
@@ -96,7 +112,6 @@ add_test(NAME netft_client_recovery COMMAND netft_client_recovery)
 add_library(netft_client_impl_test STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/client_impl.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/fault_latch.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/posix_transport.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/protocol.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/sequence.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/xml_config.cpp

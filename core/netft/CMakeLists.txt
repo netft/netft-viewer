@@ -5,11 +5,16 @@ add_library(netft_viewer_netft STATIC
   src/client.cpp
   src/detail/client_impl.cpp
   src/detail/fault_latch.cpp
-  src/detail/posix_transport.cpp
   src/detail/protocol.cpp
   src/detail/sequence.cpp
   src/detail/xml_config.cpp
 )
+if(WIN32)
+  target_sources(netft_viewer_netft PRIVATE src/detail/udp_transport_windows.cpp)
+  target_link_libraries(netft_viewer_netft PRIVATE ws2_32)
+else()
+  target_sources(netft_viewer_netft PRIVATE src/detail/udp_transport_posix.cpp)
+endif()
 target_compile_definitions(netft_viewer_netft PRIVATE NETFT_BUILDING_LIBRARY)
 target_compile_features(netft_viewer_netft PUBLIC cxx_std_17)
 target_include_directories(netft_viewer_netft PUBLIC include PRIVATE src)
