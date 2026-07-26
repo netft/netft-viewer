@@ -1,0 +1,328 @@
+.viewer-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(560px, 1fr);
+  width: 100%;
+  min-width: 860px;
+  height: 100vh;
+  min-height: 560px;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.sensor-sidebar {
+  width: 300px;
+  min-height: 0;
+  padding: 18px 16px 20px;
+  overflow-y: auto;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border-strong);
+}
+
+.plot-workspace {
+  min-width: 560px;
+  min-height: 100%;
+  background: var(--canvas);
+}
+
+.product-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.product-heading h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.product-mark {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.product-mark circle {
+  fill: var(--surface);
+}
+
+.sidebar-section {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-section h2 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.connection-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+}
+
+.sensor-host-field {
+  position: relative;
+  min-width: 0;
+}
+
+.sensor-host-field input {
+  width: 100%;
+  height: 36px;
+  padding: 0 9px 0 31px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.field-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 9px;
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.field-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.button:not(:disabled) {
+  cursor: pointer;
+}
+
+.button-primary {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.button-secondary {
+  color: var(--accent);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: #edf3ff;
+}
+
+.button-danger {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.button-danger-outline {
+  color: var(--danger);
+  background: var(--surface);
+  border-color: var(--danger);
+}
+
+.status-list {
+  margin: 0;
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
+  align-items: baseline;
+  min-height: 28px;
+  gap: 12px;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.status-row dt,
+.status-row dd {
+  margin: 0;
+}
+
+.status-row dt {
+  color: var(--muted);
+}
+
+.status-row dd {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-divider {
+  height: 1px;
+  margin: 5px 0 8px;
+  background: var(--border);
+}
+
+.status-buffer-row dd {
+  display: grid;
+  grid-template-columns: auto 76px;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-buffer-row progress {
+  width: 76px;
+  height: 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  appearance: none;
+  background: var(--border);
+}
+
+.status-buffer-row progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.status-buffer-row progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.status-buffer-row progress::-moz-progress-bar {
+  background: var(--accent);
+}
+
+.tone-success {
+  color: var(--success);
+}
+
+.tone-warning {
+  color: var(--warning);
+}
+
+.tone-danger {
+  color: var(--danger);
+}
+
+.wrench-table-frame {
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+.wrench-table-frame table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.wrench-table-frame th,
+.wrench-table-frame td {
+  height: 27px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wrench-table-frame tr:last-child th,
+.wrench-table-frame tr:last-child td {
+  border-bottom: 0;
+}
+
+.wrench-table-frame thead th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.wrench-table-frame thead th:first-child {
+  width: 42px;
+  text-align: left;
+}
+
+.wrench-table-frame tbody th {
+  font-weight: 600;
+  text-align: left;
+}
+
+.wrench-table-frame tbody td {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.configuration-revision {
+  margin: 9px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.measurement-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}
