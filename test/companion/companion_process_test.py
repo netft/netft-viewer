@@ -85,6 +85,28 @@ class CompanionProcess:
             preceding.append(event)
         raise AssertionError("expected event was not observed")
 
+    def read_stop_result_and_final_progress(
+        self, request_id: str
+    ) -> tuple[dict, dict]:
+        result = None
+        final_progress = None
+        previous_was_final_state = False
+        for _ in range(200):
+            event = self.read_event()
+            if previous_was_final_state and event["type"] == "recording_progress":
+                final_progress = event
+            previous_was_final_state = (
+                event["type"] == "recording_state"
+                and event["payload"]["state"] == "idle"
+            )
+            if event.get("requestId") == request_id:
+                result = event
+            if result is not None and final_progress is not None:
+                return result, final_progress
+        raise AssertionError(
+            "stop result and adjacent final recording snapshot were not observed"
+        )
+
     def close(self) -> None:
         if self.process.poll() is None:
             try:
@@ -389,31 +411,14 @@ class CompanionProcessTest(unittest.TestCase):
                 companion.read_until(lambda event: event["type"] == "live_wrench")
 
                 companion.send(command("stop_recording", "req-stop"))
-                stopped, preceding = companion.read_until(
-                    lambda event: event.get("requestId") == "req-stop"
+                stopped, final_progress = (
+                    companion.read_stop_result_and_final_progress("req-stop")
                 )
                 self.assertTrue(stopped["payload"]["success"])
-                final_progress = next(
-                    (
-                        event
-                        for event in reversed(preceding)
-                        if event["type"] == "recording_progress"
-                        and int(event["payload"]["acceptedSamples"])
-                        == int(event["payload"]["writtenSamples"])
-                        and int(event["payload"]["acceptedSamples"]) > 0
-                    ),
-                    None,
-                )
-                if final_progress is None:
-                    final_progress, _ = companion.read_until(
-                        lambda event: event["type"] == "recording_progress"
-                        and int(event["payload"]["acceptedSamples"])
-                        == int(event["payload"]["writtenSamples"])
-                        and int(event["payload"]["acceptedSamples"]) > 0
-                    )
                 self.assertTrue(target.is_file())
                 self.assertFalse(Path(f"{target}.partial").exists())
                 data_rows = len(target.read_text().splitlines()) - 1
+                self.assertGreater(data_rows, 0)
                 self.assertEqual(
                     int(final_progress["payload"]["acceptedSamples"]), data_rows
                 )
