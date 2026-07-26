@@ -8,7 +8,7 @@
       "required": ["major", "minor"],
       "properties": {
         "major": { "const": 1 },
-        "minor": { "type": "integer", "minimum": 0 }
+        "minor": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
       }
     },
     "nanoseconds": {
@@ -73,7 +73,12 @@
       "properties": {
         "protocol": { "$ref": "#/$defs/protocol" },
         "type": { "type": "string" },
-        "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
         "monotonicNs": { "$ref": "#/$defs/nanoseconds" },
         "payload": { "type": "object" }
       }
@@ -97,7 +102,11 @@
               ],
               "properties": {
                 "protocolMajor": { "const": 1 },
-                "protocolMinor": { "type": "integer", "minimum": 0 },
+                "protocolMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
                 "appVersion": { "type": "string", "minLength": 1 },
                 "coreSnapshot": {
                   "type": "string",
@@ -294,7 +303,11 @@
                   "type": "array",
                   "minItems": 6,
                   "maxItems": 6,
-                  "items": { "type": "integer" }
+                  "items": {
+                    "type": "integer",
+                    "minimum": -2147483648,
+                    "maximum": 2147483647
+                  }
                 },
                 "force": {
                   "type": "array",

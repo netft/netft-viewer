@@ -30,8 +30,14 @@ Json parse_unique_json(std::string_view line) {
   }
 
   std::vector<std::set<std::string>> object_keys;
-  const auto callback = [&object_keys](int, Json::parse_event_t event,
+  const auto callback = [&object_keys](int depth, Json::parse_event_t event,
                                        Json &parsed) {
+    if ((event == Json::parse_event_t::object_start ||
+         event == Json::parse_event_t::array_start) &&
+        (depth < 0 ||
+         static_cast<std::size_t>(depth) >= maximum_json_nesting_depth)) {
+      throw ProtocolError("JSON nesting depth exceeds protocol limit");
+    }
     if (event == Json::parse_event_t::object_start) {
       object_keys.emplace_back();
     } else if (event == Json::parse_event_t::key) {
@@ -187,10 +193,14 @@ bool valid_sensor_host(std::string_view host) {
 }
 
 bool valid_request_id(std::string_view request_id) {
-  return !request_id.empty() && request_id.size() <= 128U &&
+  return !request_id.empty() && request_id.size() <= maximum_request_id_bytes &&
          std::all_of(
              request_id.begin(), request_id.end(), [](unsigned char character) {
-               return std::isalnum(character) != 0 || character == '-' ||
+               const auto ascii_alphanumeric =
+                   (character >= '0' && character <= '9') ||
+                   (character >= 'A' && character <= 'Z') ||
+                   (character >= 'a' && character <= 'z');
+               return ascii_alphanumeric || character == '-' ||
                       character == '_' || character == '.' || character == ':';
              });
 }
@@ -217,7 +227,8 @@ CommandHeader parse_header(const Json &root) {
     throw ProtocolError("incompatible protocol major");
   }
   const auto minor = required_u32(protocol, "minor");
-  auto request_id = required_string(root, "requestId", 128U);
+  auto request_id =
+      required_string(root, "requestId", maximum_request_id_bytes);
   if (!valid_request_id(request_id)) {
     throw ProtocolError("request ID contains unsupported characters");
   }
@@ -472,6 +483,21 @@ std::optional<Json> session_envelope(const SessionEventMessage &message) {
 
 } // namespace
 
+SerializedEvent::SerializedEvent(std::string json_line,
+                                 std::optional<MeasurementLease> delivery_lease,
+                                 bool measurement)
+    : json_line_(std::move(json_line)),
+      delivery_lease_(std::move(delivery_lease)), measurement_(measurement) {}
+
+const std::string &SerializedEvent::json_line() const noexcept {
+  return json_line_;
+}
+
+bool SerializedEvent::valid_for_delivery() const noexcept {
+  return !measurement_ ||
+         (delivery_lease_.has_value() && delivery_lease_->valid());
+}
+
 Command parse_command(std::string_view line) {
   const auto root = parse_unique_json(line);
   if (!root.is_object()) {
@@ -527,7 +553,7 @@ Command parse_command(std::string_view line) {
   throw ProtocolError("unknown command type");
 }
 
-std::optional<std::string> serialize_event(const CompanionEvent &event) {
+std::optional<SerializedEvent> serialize_event(const CompanionEvent &event) {
   try {
     const auto serialized = std::visit(
         [](const auto &message) -> std::optional<Json> {
@@ -585,14 +611,26 @@ std::optional<std::string> serialize_event(const CompanionEvent &event) {
     if (line.size() > maximum_line_bytes) {
       return std::nullopt;
     }
-    if (const auto *message = std::get_if<SessionEventMessage>(&event);
-        message != nullptr &&
-        (std::holds_alternative<TimedSample>(message->event.payload) ||
-         std::holds_alternative<PlotBatch>(message->event.payload)) &&
-        !message->event.valid_for_delivery()) {
+    std::optional<MeasurementLease> delivery_lease;
+    bool measurement = false;
+    if (const auto *message = std::get_if<SessionEventMessage>(&event)) {
+      measurement =
+          std::holds_alternative<TimedSample>(message->event.payload) ||
+          std::holds_alternative<PlotBatch>(message->event.payload);
+      if (measurement) {
+        if (!message->event.valid_for_delivery() ||
+            !message->event.measurement_lease) {
+          return std::nullopt;
+        }
+        delivery_lease = message->event.measurement_lease;
+      }
+    }
+    SerializedEvent frame{std::move(line), std::move(delivery_lease),
+                          measurement};
+    if (!frame.valid_for_delivery()) {
       return std::nullopt;
     }
-    return line;
+    return std::optional<SerializedEvent>{std::move(frame)};
   } catch (const std::exception &) {
     return std::nullopt;
   }

@@ -40,7 +40,9 @@ std::string serialized_session_type(netft_viewer::SessionEventPayload payload,
     if (!line) {
       return {};
     }
-    return nlohmann::json::parse(*line).at("type").get<std::string>();
+    return nlohmann::json::parse(line->json_line())
+        .at("type")
+        .get<std::string>();
   }
 
   netft_viewer::SessionEventSink sink;
@@ -57,7 +59,18 @@ std::string serialized_session_type(netft_viewer::SessionEventPayload payload,
   if (!line) {
     return {};
   }
-  return nlohmann::json::parse(*line).at("type").get<std::string>();
+  return nlohmann::json::parse(line->json_line()).at("type").get<std::string>();
+}
+
+std::string command_at_depth(std::size_t depth) {
+  auto command =
+      nlohmann::json::parse(fixture_lines("valid-commands.jsonl").front());
+  nlohmann::json nested = 0;
+  for (std::size_t current = 1U; current < depth; ++current) {
+    nested = nlohmann::json{{"next", std::move(nested)}};
+  }
+  command["padding"] = std::move(nested);
+  return command.dump();
 }
 
 TEST(ProtocolTest, ParsesEveryValidCommandFixture) {
@@ -91,7 +104,7 @@ TEST(ProtocolTest, RejectsEveryInvalidCommandFixture) {
 }
 
 TEST(ProtocolTest, RejectsACommandAboveTheByteLimitBeforeParsing) {
-  const auto manifest = fixture_json("oversize-manifest.json");
+  const auto manifest = fixture_json("limits-manifest.json");
   auto value =
       nlohmann::json::parse(fixture_lines("valid-commands.jsonl").front());
   value["padding"] =
@@ -102,6 +115,49 @@ TEST(ProtocolTest, RejectsACommandAboveTheByteLimitBeforeParsing) {
       {
         const auto command = netft_viewer::companion::parse_command(line);
         (void)command;
+      },
+      netft_viewer::companion::ProtocolError);
+}
+
+TEST(ProtocolTest, EnforcesTheSharedJsonNestingBoundary) {
+  const auto manifest = fixture_json("limits-manifest.json");
+  const auto maximum = manifest.at("maximumNestingDepth").get<std::size_t>();
+  EXPECT_EQ(netft_viewer::companion::maximum_json_nesting_depth, maximum);
+  EXPECT_NO_THROW({
+    const auto command =
+        netft_viewer::companion::parse_command(command_at_depth(maximum));
+    (void)command;
+  });
+  EXPECT_THROW(
+      {
+        const auto command = netft_viewer::companion::parse_command(
+            command_at_depth(maximum + 1U));
+        (void)command;
+      },
+      netft_viewer::companion::ProtocolError);
+}
+
+TEST(ProtocolTest, EnforcesMinorAndRequestIdBoundaries) {
+  const auto manifest = fixture_json("limits-manifest.json");
+  EXPECT_EQ(netft_viewer::companion::maximum_request_id_bytes,
+            manifest.at("maximumRequestIdBytes").get<std::size_t>());
+  auto value =
+      nlohmann::json::parse(fixture_lines("valid-commands.jsonl").front());
+  value["protocol"]["minor"] = manifest.at("maximumProtocolMinor");
+  value["requestId"] =
+      std::string(manifest.at("maximumRequestIdBytes").get<std::size_t>(), 'r');
+  const auto command = netft_viewer::companion::parse_command(value.dump());
+  EXPECT_EQ(std::get<netft_viewer::companion::HelloCommand>(command)
+                .header.peer_minor,
+            std::numeric_limits<std::uint32_t>::max());
+
+  value["requestId"] = std::string(
+      manifest.at("maximumRequestIdBytes").get<std::size_t>() + 1U, 'r');
+  EXPECT_THROW(
+      {
+        const auto invalid =
+            netft_viewer::companion::parse_command(value.dump());
+        (void)invalid;
       },
       netft_viewer::companion::ProtocolError);
 }
@@ -134,7 +190,8 @@ TEST(ProtocolTest, SerializesRecordingProgressCountersAsDecimalStrings) {
 
   const auto line = netft_viewer::companion::serialize_event(event);
   ASSERT_TRUE(line);
-  const auto value = nlohmann::json::parse(*line);
+  EXPECT_TRUE(line->valid_for_delivery());
+  const auto value = nlohmann::json::parse(line->json_line());
   EXPECT_EQ(value.at("type"), "recording_progress");
   EXPECT_EQ(value.at("payload").at("acceptedSamples"), "10");
   EXPECT_EQ(value.at("payload").at("queueCapacity"), "65536");
@@ -144,6 +201,9 @@ TEST(ProtocolTest, RejectsUncorrelatableResponseValues) {
   const netft_viewer::companion::HelloEvent bad_hello{"", 1, "0.1.0",
                                                       "not-a-snapshot"};
   EXPECT_FALSE(netft_viewer::companion::serialize_event(bad_hello));
+  const netft_viewer::companion::HelloEvent bad_request_id{
+      "bad/request", 1, "0.1.0", "e424c401587052f03de9b94f76f1e86b78902105"};
+  EXPECT_FALSE(netft_viewer::companion::serialize_event(bad_request_id));
 
   const netft_viewer::companion::CommandResultEvent hello_result{
       "req-1", 2, "hello", true, "", ""};
@@ -152,6 +212,35 @@ TEST(ProtocolTest, RejectsUncorrelatableResponseValues) {
   const netft_viewer::companion::CommandResultEvent incomplete_failure{
       "req-1", 3, "connect", false, "", ""};
   EXPECT_FALSE(netft_viewer::companion::serialize_event(incomplete_failure));
+}
+
+TEST(ProtocolTest, RetainsMeasurementValidityUntilOutputCommit) {
+  netft_viewer::SessionEventSink sink;
+  ASSERT_TRUE(sink.begin_measurements());
+  netft_viewer::TimedSample sample;
+  sample.sample.raw_wrench = {
+      std::numeric_limits<std::int32_t>::min(),
+      std::numeric_limits<std::int32_t>::max(),
+      0,
+      0,
+      0,
+      0,
+  };
+  sink.enqueue(netft_viewer::SessionEvent{1U, std::move(sample), std::nullopt});
+  auto read = sink.try_pop();
+  ASSERT_TRUE(read.event);
+  auto frame = netft_viewer::companion::serialize_event(
+      netft_viewer::companion::SessionEventMessage{4, std::move(*read.event)});
+  ASSERT_TRUE(frame);
+  ASSERT_TRUE(frame->valid_for_delivery());
+  const auto raw =
+      nlohmann::json::parse(frame->json_line()).at("payload").at("raw");
+  EXPECT_EQ(raw.at(0), std::numeric_limits<std::int32_t>::min());
+  EXPECT_EQ(raw.at(1), std::numeric_limits<std::int32_t>::max());
+
+  sink.revoke_measurements();
+
+  EXPECT_FALSE(frame->valid_for_delivery());
 }
 
 TEST(ProtocolTest, RejectsSessionPayloadsThatWouldViolateTheEventSchema) {

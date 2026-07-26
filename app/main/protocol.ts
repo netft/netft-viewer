@@ -3,6 +3,11 @@ import { z } from "zod";
 export const PROTOCOL_MAJOR = 1 as const;
 export const PROTOCOL_MINOR = 0 as const;
 export const MAXIMUM_LINE_BYTES = 1024 * 1024;
+export const MAXIMUM_JSON_NESTING_DEPTH = 64;
+export const MAXIMUM_REQUEST_ID_BYTES = 128;
+export const MAXIMUM_PROTOCOL_MINOR = 4_294_967_295;
+export const MINIMUM_RAW_WRENCH = -2_147_483_648;
+export const MAXIMUM_RAW_WRENCH = 2_147_483_647;
 
 const canonicalDecimal = /^(0|[1-9][0-9]*)$/;
 const maximumInt64 = 9_223_372_036_854_775_807n;
@@ -19,13 +24,19 @@ export const CounterSchema = decimalString(maximumUint64);
 
 const ProtocolVersionSchema = z.object({
   major: z.literal(PROTOCOL_MAJOR),
-  minor: z.number().int().nonnegative(),
+  minor: z.number().int().nonnegative().max(MAXIMUM_PROTOCOL_MINOR),
 });
+
+const RequestIdSchema = z
+  .string()
+  .min(1)
+  .max(MAXIMUM_REQUEST_ID_BYTES)
+  .regex(/^[A-Za-z0-9_.:-]+$/);
 
 export const EnvelopeSchema = z.object({
   protocol: ProtocolVersionSchema,
   type: z.string(),
-  requestId: z.string().min(1).max(128).optional(),
+  requestId: RequestIdSchema.optional(),
   monotonicNs: NanosecondsSchema,
   payload: z.unknown(),
 });
@@ -39,8 +50,8 @@ const eventEnvelope = <Type extends string, Payload extends z.ZodType>(
     protocol: ProtocolVersionSchema,
     type: z.literal(type),
     ...(correlated
-      ? { requestId: z.string().min(1).max(128) }
-      : { requestId: z.string().min(1).max(128).optional() }),
+      ? { requestId: RequestIdSchema }
+      : { requestId: RequestIdSchema.optional() }),
     monotonicNs: NanosecondsSchema,
     payload,
   });
@@ -59,7 +70,7 @@ const HelloEventSchema = eventEnvelope(
   "hello",
   z.object({
     protocolMajor: z.literal(PROTOCOL_MAJOR),
-    protocolMinor: z.number().int().nonnegative(),
+    protocolMinor: z.number().int().nonnegative().max(MAXIMUM_PROTOCOL_MINOR),
     appVersion: z.string().min(1),
     coreSnapshot: z.string().regex(/^[0-9a-f]{40}$/),
   }),
@@ -185,12 +196,12 @@ const WrenchEventSchema = eventEnvelope(
     ftSequence: z.number().int().nonnegative().max(4_294_967_295),
     status: z.number().int().nonnegative().max(4_294_967_295),
     raw: z.tuple([
-      z.number().int(),
-      z.number().int(),
-      z.number().int(),
-      z.number().int(),
-      z.number().int(),
-      z.number().int(),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
+      z.number().int().min(MINIMUM_RAW_WRENCH).max(MAXIMUM_RAW_WRENCH),
     ]),
     force: z.tuple([
       z.number().finite(),
@@ -333,10 +344,13 @@ const assertNoDuplicateObjectKeys = (source: string): void => {
     throw new Error("unterminated JSON string");
   };
 
-  const parseValue = (): void => {
+  const parseValue = (depth: number): void => {
     skipWhitespace();
     const character = source[cursor];
     if (character === "{") {
+      if (depth >= MAXIMUM_JSON_NESTING_DEPTH) {
+        throw new Error("JSON nesting depth exceeds protocol limit");
+      }
       cursor += 1;
       const keys = new Set<string>();
       skipWhitespace();
@@ -359,7 +373,7 @@ const assertNoDuplicateObjectKeys = (source: string): void => {
           throw new Error("missing object separator");
         }
         cursor += 1;
-        parseValue();
+        parseValue(depth + 1);
         skipWhitespace();
         if (source[cursor] === "}") {
           cursor += 1;
@@ -372,6 +386,9 @@ const assertNoDuplicateObjectKeys = (source: string): void => {
       }
     }
     if (character === "[") {
+      if (depth >= MAXIMUM_JSON_NESTING_DEPTH) {
+        throw new Error("JSON nesting depth exceeds protocol limit");
+      }
       cursor += 1;
       skipWhitespace();
       if (source[cursor] === "]") {
@@ -379,7 +396,7 @@ const assertNoDuplicateObjectKeys = (source: string): void => {
         return;
       }
       for (;;) {
-        parseValue();
+        parseValue(depth + 1);
         skipWhitespace();
         if (source[cursor] === "]") {
           cursor += 1;
@@ -404,7 +421,7 @@ const assertNoDuplicateObjectKeys = (source: string): void => {
     }
   };
 
-  parseValue();
+  parseValue(0);
   skipWhitespace();
   if (cursor !== source.length) {
     throw new Error("trailing JSON data");

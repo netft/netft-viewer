@@ -8,7 +8,7 @@
       "required": ["major", "minor"],
       "properties": {
         "major": { "const": 1 },
-        "minor": { "type": "integer", "minimum": 0 }
+        "minor": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
       }
     },
     "decimalNs": {

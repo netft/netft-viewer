@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   CompanionEventSchema,
+  MAXIMUM_JSON_NESTING_DEPTH,
   MAXIMUM_LINE_BYTES,
+  MAXIMUM_PROTOCOL_MINOR,
+  MAXIMUM_RAW_WRENCH,
+  MAXIMUM_REQUEST_ID_BYTES,
+  MINIMUM_RAW_WRENCH,
   parseCompanionEventLine,
 } from "../../app/main/protocol";
 
@@ -43,6 +48,36 @@ const validSensorHost = (value: string): boolean => {
   );
 };
 
+interface LimitManifest {
+  limitBytes: number;
+  eventPaddingBytes: number;
+  maximumNestingDepth: number;
+  maximumRequestIdBytes: number;
+  maximumProtocolMinor: number;
+  minimumRawWrench: number;
+  maximumRawWrench: number;
+}
+
+const limitManifest = (): LimitManifest =>
+  JSON.parse(
+    readFileSync(
+      resolve("protocol", "fixtures", "limits-manifest.json"),
+      "utf8",
+    ),
+  ) as LimitManifest;
+
+const eventAtDepth = (depth: number): string => {
+  const event = JSON.parse(fixtureLines("valid-events.jsonl")[0] ?? "{}") as {
+    padding?: unknown;
+  };
+  let nested: unknown = 0;
+  for (let current = 1; current < depth; current += 1) {
+    nested = { next: nested };
+  }
+  event.padding = nested;
+  return JSON.stringify(event);
+};
+
 describe("companion protocol", () => {
   it("accepts every valid event fixture as a typed event", () => {
     for (const line of fixtureLines("valid-events.jsonl")) {
@@ -62,15 +97,7 @@ describe("companion protocol", () => {
   });
 
   it("enforces the UTF-8 byte limit before JSON parsing", () => {
-    const manifest = JSON.parse(
-      readFileSync(
-        resolve("protocol", "fixtures", "oversize-manifest.json"),
-        "utf8",
-      ),
-    ) as {
-      limitBytes: number;
-      eventPaddingBytes: number;
-    };
+    const manifest = limitManifest();
     const value = JSON.parse(fixtureLines("valid-events.jsonl")[0] ?? "{}") as {
       padding?: string;
     };
@@ -81,6 +108,49 @@ describe("companion protocol", () => {
     );
     expect(MAXIMUM_LINE_BYTES).toBe(manifest.limitBytes);
     expect(() => parseCompanionEventLine(line)).toThrow();
+  });
+
+  it("enforces the shared JSON nesting boundary", () => {
+    const manifest = limitManifest();
+    expect(MAXIMUM_JSON_NESTING_DEPTH).toBe(manifest.maximumNestingDepth);
+    expect(() =>
+      parseCompanionEventLine(eventAtDepth(manifest.maximumNestingDepth)),
+    ).not.toThrow();
+    expect(() =>
+      parseCompanionEventLine(eventAtDepth(manifest.maximumNestingDepth + 1)),
+    ).toThrow();
+  });
+
+  it("enforces minor, request ID, and raw int32 boundaries", () => {
+    const manifest = limitManifest();
+    expect(MAXIMUM_PROTOCOL_MINOR).toBe(manifest.maximumProtocolMinor);
+    expect(MAXIMUM_REQUEST_ID_BYTES).toBe(manifest.maximumRequestIdBytes);
+    expect(MINIMUM_RAW_WRENCH).toBe(manifest.minimumRawWrench);
+    expect(MAXIMUM_RAW_WRENCH).toBe(manifest.maximumRawWrench);
+    const hello = JSON.parse(fixtureLines("valid-events.jsonl")[0] ?? "{}") as {
+      protocol: { minor: number };
+      requestId: string;
+    };
+    hello.protocol.minor = manifest.maximumProtocolMinor;
+    hello.requestId = "r".repeat(manifest.maximumRequestIdBytes);
+    expect(CompanionEventSchema.safeParse(hello).success).toBe(true);
+
+    hello.protocol.minor = manifest.maximumProtocolMinor + 1;
+    expect(CompanionEventSchema.safeParse(hello).success).toBe(false);
+    hello.protocol.minor = manifest.maximumProtocolMinor;
+    hello.requestId = "r".repeat(manifest.maximumRequestIdBytes + 1);
+    expect(CompanionEventSchema.safeParse(hello).success).toBe(false);
+
+    const wrench = JSON.parse(
+      fixtureLines("valid-events.jsonl")[4] ?? "{}",
+    ) as {
+      payload: { raw: number[] };
+    };
+    wrench.payload.raw[0] = manifest.minimumRawWrench;
+    wrench.payload.raw[1] = manifest.maximumRawWrench;
+    expect(CompanionEventSchema.safeParse(wrench).success).toBe(true);
+    wrench.payload.raw[0] = manifest.minimumRawWrench - 1;
+    expect(CompanionEventSchema.safeParse(wrench).success).toBe(false);
   });
 
   it("keeps draft-compatible command and event schemas aligned with fixtures", () => {
@@ -145,5 +215,26 @@ describe("companion protocol", () => {
     expect(fixtureValues("invalid-events.jsonl").every((v) => !events(v))).toBe(
       true,
     );
+
+    const manifest = limitManifest();
+    const commandBoundary = JSON.parse(
+      fixtureLines("valid-commands.jsonl")[0] ?? "{}",
+    ) as { protocol: { minor: number }; requestId: string };
+    commandBoundary.protocol.minor = manifest.maximumProtocolMinor;
+    commandBoundary.requestId = "r".repeat(manifest.maximumRequestIdBytes);
+    expect(commands(commandBoundary)).toBe(true);
+    commandBoundary.requestId = "r".repeat(manifest.maximumRequestIdBytes + 1);
+    expect(commands(commandBoundary)).toBe(false);
+
+    const eventBoundary = JSON.parse(
+      fixtureLines("valid-events.jsonl")[0] ?? "{}",
+    ) as { protocol: { minor: number }; requestId: string };
+    eventBoundary.protocol.minor = manifest.maximumProtocolMinor;
+    eventBoundary.requestId = "r".repeat(manifest.maximumRequestIdBytes);
+    expect(envelope(eventBoundary)).toBe(true);
+    expect(events(eventBoundary)).toBe(true);
+    eventBoundary.protocol.minor = manifest.maximumProtocolMinor + 1;
+    expect(envelope(eventBoundary)).toBe(false);
+    expect(events(eventBoundary)).toBe(false);
   });
 });

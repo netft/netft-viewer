@@ -10,11 +10,16 @@
       "required": ["major", "minor"],
       "properties": {
         "major": { "const": 1 },
-        "minor": { "type": "integer", "minimum": 0 }
+        "minor": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
       }
     },
     "type": { "type": "string", "minLength": 1 },
-    "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
     "monotonicNs": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)$",

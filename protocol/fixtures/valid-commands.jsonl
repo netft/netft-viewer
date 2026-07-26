@@ -1,6 +1,6 @@
 {"protocol":{"major":1,"minor":0},"type":"hello","requestId":"req-hello","monotonicNs":"0","payload":{}}
 {"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-connect","monotonicNs":"42","payload":{"sensorHost":"192.168.1.1"}}
-{"protocol":{"major":1,"minor":1},"type":"disconnect","requestId":"req-disconnect","monotonicNs":"43","payload":{"futureOptional":true},"futureOptional":"ignored"}
+{"protocol":{"major":1,"minor":4294967295},"type":"disconnect","requestId":"req-disconnect","monotonicNs":"43","payload":{"futureOptional":true},"futureOptional":"ignored"}
 {"protocol":{"major":1,"minor":0},"type":"set_paused","requestId":"req-pause","monotonicNs":"44","payload":{"paused":true}}
 {"protocol":{"major":1,"minor":0},"type":"bias","requestId":"req-bias","monotonicNs":"45","payload":{}}
 {"protocol":{"major":1,"minor":0},"type":"start_recording","requestId":"req-start","monotonicNs":"46","payload":{"targetPath":"capture.csv","overwrite":false}}
