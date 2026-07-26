@@ -3,7 +3,13 @@ import { memo, useCallback, useEffect, useReducer } from "react";
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { LiveWrenchTable } from "./components/LiveWrenchTable";
 import { StatusPanel } from "./components/StatusPanel";
-import { appReducer, createInitialAppState } from "./model/app-state";
+import {
+  appReducer,
+  createInitialAppState,
+  type Preferences,
+} from "./model/app-state";
+import { createRendererEventScheduler } from "./model/event-scheduler";
+import { useViewerTheme } from "./model/viewer-theme";
 
 const PlotWorkspacePlaceholder = memo(() => (
   <section
@@ -19,14 +25,43 @@ const invoke = (request: Promise<unknown>): void => {
   });
 };
 
-export const App = () => {
+const scheduleDisplayFrame = (callback: FrameRequestCallback): number =>
+  typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame(callback)
+    : window.setTimeout(() => callback(performance.now()), 16);
+
+const cancelDisplayFrame = (handle: number): void => {
+  if (typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(handle);
+  } else {
+    window.clearTimeout(handle);
+  }
+};
+
+export interface AppProps {
+  initialPreferences?: Preferences;
+}
+
+export const App = ({ initialPreferences }: AppProps) => {
   const [state, dispatch] = useReducer(
     appReducer,
-    undefined,
+    initialPreferences,
     createInitialAppState,
   );
+  const theme = useViewerTheme(state.preferences.theme);
 
-  useEffect(() => window.netft.subscribe(dispatch), []);
+  useEffect(() => {
+    const scheduler = createRendererEventScheduler({
+      dispatch,
+      scheduleFrame: scheduleDisplayFrame,
+      cancelFrame: cancelDisplayFrame,
+    });
+    const unsubscribe = window.netft.subscribe(scheduler.push);
+    return () => {
+      unsubscribe();
+      scheduler.dispose();
+    };
+  }, []);
 
   const changeHost = useCallback((sensorHost: string) => {
     dispatch({ type: "sensor_host_changed", sensorHost });
@@ -51,7 +86,12 @@ export const App = () => {
   }, []);
 
   return (
-    <div className="viewer-shell">
+    <div
+      className={`viewer-shell theme-${theme}`}
+      data-testid="viewer-shell"
+      data-theme={theme}
+      data-theme-preference={state.preferences.theme}
+    >
       <aside className="sensor-sidebar">
         <header className="product-heading">
           <svg aria-hidden="true" className="product-mark" viewBox="0 0 32 32">

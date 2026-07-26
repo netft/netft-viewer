@@ -11,11 +11,20 @@ import { ConnectionPanel } from "../../app/renderer/components/ConnectionPanel";
 import { LiveWrenchTable } from "../../app/renderer/components/LiveWrenchTable";
 import { StatusPanel } from "../../app/renderer/components/StatusPanel";
 import {
+  AXES,
   createInitialAppState,
   type AppState,
+  type Preferences,
 } from "../../app/renderer/model/app-state";
 
 const commandOk = async () => ({ success: true });
+const DEFAULT_PREFERENCES: Preferences = {
+  sensorHost: "192.168.1.1",
+  plotMode: "combined",
+  timeWindowSeconds: 10,
+  visibleAxes: [...AXES],
+  theme: "system",
+};
 
 const installApi = () => {
   let listener: ((event: RendererEvent) => void) | undefined;
@@ -69,13 +78,13 @@ const liveState = (): AppState => ({
     sampleMonotonicNs: "100",
     raw: [-12_345, 6_789, 3_456, -2_345, 1_234, -5_678],
     calibrated: [-12.345, 6.789, 3.456, -2.345, 1.234, -5.678],
-    forceUnit: "N",
-    torqueUnit: "N-mm",
-    configurationRevision: "3",
   },
   configuration: {
     ...createInitialAppState().configuration,
+    available: true,
     productName: "ATI Net F/T",
+    forceUnit: "N",
+    torqueUnit: "N-mm",
     revision: "3",
   },
   recording: {
@@ -90,6 +99,9 @@ const liveState = (): AppState => ({
 
 afterEach(() => {
   document.body.replaceChildren();
+  Reflect.deleteProperty(window, "matchMedia");
+  Reflect.deleteProperty(window, "requestAnimationFrame");
+  Reflect.deleteProperty(window, "cancelAnimationFrame");
 });
 
 describe("fixed sensor sidebar", () => {
@@ -171,13 +183,15 @@ describe("fixed sensor sidebar", () => {
     for (const testId of [
       "connection-action",
       "pause-action",
-      "bias-action",
       "recording-action",
     ]) {
       expect((screen.getByTestId(testId) as HTMLButtonElement).disabled).toBe(
         false,
       );
     }
+    expect(
+      (screen.getByTestId("bias-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
     fireEvent.click(screen.getByTestId("recording-action"));
     expect(handlers.onStop).toHaveBeenCalledOnce();
     expect(handlers.onRecord).not.toHaveBeenCalled();
@@ -219,8 +233,75 @@ describe("fixed sensor sidebar", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(2);
   });
 
+  it("follows system theme changes and removes the media listener", () => {
+    installApi();
+    let dark = true;
+    let listener: ((event: MediaQueryListEvent) => void) | undefined;
+    const removeEventListener = vi.fn();
+    const matchMedia = vi.fn(() => ({
+      matches: dark,
+      media: "(prefers-color-scheme: dark)",
+      onchange: null,
+      addEventListener: vi.fn(
+        (_type: string, next: (event: MediaQueryListEvent) => void) => {
+          listener = next;
+        },
+      ),
+      removeEventListener,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: matchMedia,
+    });
+    const view = render(<App initialPreferences={DEFAULT_PREFERENCES} />);
+
+    expect(screen.getByTestId("viewer-shell").dataset.theme).toBe("dark");
+    dark = false;
+    act(() => {
+      listener?.({ matches: dark } as MediaQueryListEvent);
+    });
+    expect(screen.getByTestId("viewer-shell").dataset.theme).toBe("light");
+
+    view.unmount();
+    expect(removeEventListener).toHaveBeenCalledOnce();
+  });
+
+  it("applies an explicit dark theme without a system listener", () => {
+    installApi();
+    const matchMedia = vi.fn();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: matchMedia,
+    });
+
+    render(
+      <App initialPreferences={{ ...DEFAULT_PREFERENCES, theme: "dark" }} />,
+    );
+
+    expect(screen.getByTestId("viewer-shell").dataset.theme).toBe("dark");
+    expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+      "dark",
+    );
+    expect(matchMedia).not.toHaveBeenCalled();
+  });
+
   it("applies validated stream events to the displayed wrench", () => {
     const { emit } = installApi();
+    let frame: FrameRequestCallback | undefined;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frame = callback;
+        return 1;
+      },
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      value: vi.fn(),
+    });
     render(<App />);
 
     act(() => {
@@ -233,6 +314,20 @@ describe("fixed sensor sidebar", () => {
           paused: false,
           generation: "1",
           lastError: "",
+        },
+      });
+      emit({
+        protocol: { major: 1, minor: 0 },
+        type: "configuration_changed",
+        monotonicNs: "150",
+        payload: {
+          productName: "ATI Net F/T",
+          countsPerForceUnit: 1_000_000,
+          countsPerTorqueUnit: 1_000_000,
+          forceUnit: "N",
+          torqueUnit: "N-mm",
+          source: "sensor",
+          revision: "4",
         },
       });
       emit({
@@ -253,6 +348,7 @@ describe("fixed sensor sidebar", () => {
           configurationRevision: "4",
         },
       });
+      frame?.(16);
     });
 
     expect(screen.getByTestId("raw-Fx").textContent).toContain("10");

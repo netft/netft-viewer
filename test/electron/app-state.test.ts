@@ -281,6 +281,108 @@ describe("renderer state", () => {
     expect(stale.configuration.productName).toBe("New calibration");
     expect(stale.configuration.revision).toBe("7");
   });
+
+  it("accepts a lower configuration revision after connection generation changes", () => {
+    const sensorA = appReducer(streamingState(), {
+      protocol,
+      type: "configuration_changed",
+      monotonicNs: "1000",
+      payload: {
+        productName: "Sensor A",
+        countsPerForceUnit: 10,
+        countsPerTorqueUnit: 20,
+        forceUnit: "lbf",
+        torqueUnit: "lbf-in",
+        source: "sensor",
+        revision: "10",
+      },
+    });
+    const sensorBSession = appReducer(
+      sensorA,
+      connectionEvent("streaming", "2", false, "1100"),
+    );
+    const sensorB = appReducer(sensorBSession, {
+      protocol,
+      type: "configuration_changed",
+      monotonicNs: "1200",
+      payload: {
+        productName: "Sensor B",
+        countsPerForceUnit: 30,
+        countsPerTorqueUnit: 40,
+        forceUnit: "N",
+        torqueUnit: "N-mm",
+        source: "sensor",
+        revision: "1",
+      },
+    });
+
+    expect(sensorB.configuration.productName).toBe("Sensor B");
+    expect(sensorB.configuration.revision).toBe("1");
+    expect(sensorB.health.productName).toBe("Sensor B");
+  });
+
+  it("accepts a lower error sequence after a backend restart", () => {
+    const faulted = appReducer(streamingState(), {
+      protocol,
+      type: "error",
+      monotonicNs: "1000",
+      payload: {
+        operation: "sensor",
+        message: "old",
+        sequence: "10",
+        droppedBefore: "0",
+      },
+    });
+    const disconnected = appReducer(faulted, {
+      type: "backend_disconnected",
+      monotonicNs: "1100",
+      payload: { restartPending: true },
+    });
+    const restarted = appReducer(disconnected, {
+      type: "backend_state",
+      monotonicNs: "1200",
+      payload: { state: "running", startAttempts: 1 },
+    });
+    const current = appReducer(restarted, {
+      protocol,
+      type: "error",
+      monotonicNs: "1300",
+      payload: {
+        operation: "sensor",
+        message: "current",
+        sequence: "1",
+        droppedBefore: "0",
+      },
+    });
+
+    expect(current.lastErrorSequence).toBe("1");
+    expect(current.health.latestError).toBe("current");
+  });
+
+  it("keeps configuration events authoritative over health and wrench metadata", () => {
+    const configured = appReducer(streamingState(), {
+      protocol,
+      type: "configuration_changed",
+      monotonicNs: "1000",
+      payload: {
+        productName: "Authoritative",
+        countsPerForceUnit: 10,
+        countsPerTorqueUnit: 20,
+        forceUnit: "N",
+        torqueUnit: "N-mm",
+        source: "sensor",
+        revision: "2",
+      },
+    });
+    const health = appReducer(configured, healthEvent(1_000, "1100"));
+    const wrench = appReducer(health, wrenchEvent(20, "1200"));
+
+    expect(wrench.configuration.productName).toBe("Authoritative");
+    expect(wrench.configuration.revision).toBe("2");
+    expect(wrench.configuration.forceUnit).toBe("N");
+    expect(wrench.configuration.torqueUnit).toBe("N-mm");
+  });
+
   it("accepts validated preferences injected by the main-process boundary", () => {
     const initial = createInitialAppState({
       sensorHost: "sensor.example",

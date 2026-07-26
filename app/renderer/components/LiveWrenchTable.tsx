@@ -15,7 +15,8 @@ const displayUnit = (unit: string): string =>
 const AxisRow = ({ axis, index, state }: AxisRowProps) => {
   const raw = state.wrench.raw[index] ?? 0;
   const value = state.wrench.calibrated[index] ?? 0;
-  const unit = index < 3 ? state.wrench.forceUnit : state.wrench.torqueUnit;
+  const unit =
+    index < 3 ? state.configuration.forceUnit : state.configuration.torqueUnit;
 
   return (
     <tr>
@@ -68,9 +69,7 @@ const LiveWrenchTableView = ({
       <p className="configuration-revision">
         Configuration revision{" "}
         <span data-testid="configuration-revision">
-          {state.wrench.configurationRevision !== "0"
-            ? state.wrench.configurationRevision
-            : state.configuration.revision}
+          {state.configuration.available ? state.configuration.revision : "—"}
         </span>
       </p>
       <div className="measurement-actions" aria-label="Sensor actions">
@@ -86,7 +85,7 @@ const LiveWrenchTableView = ({
         <button
           className="button button-secondary"
           data-testid="bias-action"
-          disabled={!streaming}
+          disabled={!streaming || state.paused}
           onClick={onBias}
           type="button"
         >

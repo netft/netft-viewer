@@ -59,9 +59,6 @@ export interface WrenchView {
   sampleMonotonicNs: string;
   raw: [number, number, number, number, number, number];
   calibrated: [number, number, number, number, number, number];
-  forceUnit: string;
-  torqueUnit: string;
-  configurationRevision: string;
 }
 
 export interface RecordingView {
@@ -82,6 +79,7 @@ export interface PlotView {
 }
 
 export interface ConfigurationView {
+  available: boolean;
   productName: string;
   forceUnit: string;
   torqueUnit: string;
@@ -102,7 +100,7 @@ export interface AppState {
   plot: PlotView;
   configuration: ConfigurationView;
   preferences: Preferences;
-  lastErrorSequence: string;
+  lastErrorSequence: string | null;
 }
 
 export type AppAction =
@@ -124,9 +122,6 @@ const emptyWrench = (): WrenchView => ({
   sampleMonotonicNs: "0",
   raw: [0, 0, 0, 0, 0, 0],
   calibrated: [0, 0, 0, 0, 0, 0],
-  forceUnit: "N",
-  torqueUnit: "N-mm",
-  configurationRevision: "0",
 });
 
 const emptyRecording = (): RecordingView => ({
@@ -150,24 +145,50 @@ const compareDecimal = (left: string, right: string): number => {
 const isNewer = (candidate: string, current: string): boolean =>
   compareDecimal(candidate, current) > 0;
 
-const clearLiveSession = (state: AppState): AppState => ({
+const emptyConfiguration = (): ConfigurationView => ({
+  available: false,
+  productName: "",
+  forceUnit: "unknown",
+  torqueUnit: "unknown",
+  revision: "0",
+  lastMonotonicNs: "0",
+});
+
+const clearSensorIdentity = (state: AppState): AppState => ({
   ...state,
-  paused: false,
   health: {
     ...state.health,
-    state: "stopped",
-    receiveRateHz: 0,
-    deliveryRateHz: 0,
-    packetLossPercent: 0,
-    deviceStatus: 0,
+    faultCode: "none",
+    sensorHost: "",
+    productName: "",
+    latestError: "",
+    lastMonotonicNs: "0",
   },
   wrench: emptyWrench(),
   plot: {
     lastBatch: null,
     lastMonotonicNs: "0",
   },
-  recording: emptyRecording(),
+  configuration: emptyConfiguration(),
+  lastErrorSequence: null,
 });
+
+const clearLiveSession = (state: AppState): AppState => {
+  const cleared = clearSensorIdentity(state);
+  return {
+    ...cleared,
+    paused: false,
+    health: {
+      ...cleared.health,
+      state: "stopped",
+      receiveRateHz: 0,
+      deliveryRateHz: 0,
+      packetLossPercent: 0,
+      deviceStatus: 0,
+    },
+    recording: emptyRecording(),
+  };
+};
 
 const clearBackendSession = (state: AppState): AppState => ({
   ...clearLiveSession(state),
@@ -210,18 +231,12 @@ export const createInitialAppState = (
     lastBatch: null,
     lastMonotonicNs: "0",
   },
-  configuration: {
-    productName: "",
-    forceUnit: "N",
-    torqueUnit: "N-mm",
-    revision: "0",
-    lastMonotonicNs: "0",
-  },
+  configuration: emptyConfiguration(),
   preferences: {
     ...preferences,
     visibleAxes: [...preferences.visibleAxes],
   },
-  lastErrorSequence: "0",
+  lastErrorSequence: null,
 });
 
 const reduceConnection = (
@@ -239,14 +254,19 @@ const reduceConnection = (
   ) {
     return state;
   }
+  const resetIdentity =
+    generationOrder > 0 ||
+    (event.payload.state === "reconnecting" &&
+      state.connection !== "reconnecting");
+  const scopedState = resetIdentity ? clearSensorIdentity(state) : state;
   const next: AppState = {
-    ...state,
+    ...scopedState,
     connection: event.payload.state,
     connectionGeneration: event.payload.generation,
     connectionMonotonicNs: event.monotonicNs,
     paused: event.payload.paused,
     health: {
-      ...state.health,
+      ...scopedState.health,
       latestError: event.payload.lastError,
     },
   };
@@ -265,20 +285,6 @@ const reduceHealth = (
   const attempted = received + lost;
   const packetLossPercent =
     attempted === 0n ? 0 : Number((lost * 1_000_000n) / attempted) / 10_000;
-  let configuration = state.configuration;
-  const sensorConfiguration = event.payload.sensorConfiguration;
-  if (
-    sensorConfiguration !== undefined &&
-    compareDecimal(sensorConfiguration.revision, configuration.revision) >= 0
-  ) {
-    configuration = {
-      productName: sensorConfiguration.productName,
-      forceUnit: sensorConfiguration.forceUnit,
-      torqueUnit: sensorConfiguration.torqueUnit,
-      revision: sensorConfiguration.revision,
-      lastMonotonicNs: event.monotonicNs,
-    };
-  }
   const connectedHost =
     state.connection === "streaming" && event.payload.sensorHost.length > 0
       ? event.payload.sensorHost
@@ -289,7 +295,7 @@ const reduceHealth = (
       state: event.payload.state,
       faultCode: event.payload.faultCode,
       sensorHost: event.payload.sensorHost,
-      productName: sensorConfiguration?.productName ?? state.health.productName,
+      productName: state.health.productName,
       receiveRateHz: event.payload.receiveRateHz,
       deliveryRateHz: event.payload.deliveryRateHz,
       packetLossPercent,
@@ -297,7 +303,6 @@ const reduceHealth = (
       latestError: event.payload.lastError,
       lastMonotonicNs: event.monotonicNs,
     },
-    configuration,
     preferences: {
       ...state.preferences,
       sensorHost: connectedHost,
@@ -430,9 +435,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           sampleMonotonicNs: action.payload.sampleMonotonicNs,
           raw: action.payload.raw,
           calibrated: [...action.payload.force, ...action.payload.torque],
-          forceUnit: action.payload.forceUnit,
-          torqueUnit: action.payload.torqueUnit,
-          configurationRevision: action.payload.configurationRevision,
         },
       };
     case "plot_batch":
@@ -456,14 +458,20 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       return reduceRecordingProgress(state, action);
     case "configuration_changed":
       if (
+        state.configuration.available &&
         compareDecimal(action.payload.revision, state.configuration.revision) <=
-        0
+          0
       ) {
         return state;
       }
       return {
         ...state,
+        health: {
+          ...state.health,
+          productName: action.payload.productName,
+        },
         configuration: {
+          available: true,
           productName: action.payload.productName,
           forceUnit: action.payload.forceUnit,
           torqueUnit: action.payload.torqueUnit,
@@ -473,6 +481,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     case "error":
       if (
+        state.lastErrorSequence !== null &&
         compareDecimal(action.payload.sequence, state.lastErrorSequence) <= 0
       ) {
         return state;

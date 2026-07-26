@@ -6,6 +6,7 @@
   height: 100vh;
   min-height: 560px;
   overflow: hidden;
+  color: var(--ink);
   background: var(--canvas);
 }
 
@@ -134,7 +135,7 @@
 }
 
 .button-primary {
-  color: #ffffff;
+  color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -151,11 +152,11 @@
 }
 
 .button-secondary:hover:not(:disabled) {
-  background: #edf3ff;
+  background: var(--accent-soft);
 }
 
 .button-danger {
-  color: #ffffff;
+  color: var(--on-danger);
   background: var(--danger);
   border-color: var(--danger);
 }
