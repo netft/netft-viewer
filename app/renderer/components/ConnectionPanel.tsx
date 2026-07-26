@@ -74,6 +74,7 @@ const ConnectionPanelView = ({
         {active ? (
           <button
             className="button button-secondary"
+            data-action="disconnect"
             data-testid="connection-action"
             aria-busy={actionPending}
             disabled={!canDisconnect}
@@ -85,6 +86,7 @@ const ConnectionPanelView = ({
         ) : (
           <button
             className="button button-primary"
+            data-action="connect"
             data-testid="connection-action"
             aria-busy={actionPending}
             disabled={!canConnect}

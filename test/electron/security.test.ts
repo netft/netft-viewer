@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -259,9 +259,14 @@ describe("Electron window security", () => {
 
   it("serves only allowlisted renderer files below the fixed root", async () => {
     const root = await mkdtemp(join(tmpdir(), "netft-renderer-protocol-"));
+    const outside = await mkdtemp(join(tmpdir(), "netft-renderer-outside-"));
     await writeFile(join(root, "index.html"), "<main></main>", "utf8");
     await writeFile(join(root, "asset.js"), "export {};", "utf8");
     await writeFile(join(root, "data.json"), "{}", "utf8");
+    await writeFile(join(outside, "outside.js"), "export const escaped = 1;");
+    await symlink(join(outside, "outside.js"), join(root, "link.js"));
+    await symlink(join(outside, "missing.js"), join(root, "broken.js"));
+    await mkdir(join(root, "directory.js"));
     let handler: ((request: Request) => Promise<Response>) | undefined;
     installRendererProtocol(
       {
@@ -281,11 +286,15 @@ describe("Electron window security", () => {
       "netft-viewer://foreign/index.html",
       "netft-viewer://app/data.json",
       "netft-viewer://app/%2e%2e%2foutside.js",
+      "netft-viewer://app/link.js",
+      "netft-viewer://app/broken.js",
+      "netft-viewer://app/directory.js",
       "netft-viewer://app/missing.js",
     ]) {
       expect((await handler?.(new Request(url)))?.status).toBe(404);
     }
     await rm(root, { force: true, recursive: true });
+    await rm(outside, { force: true, recursive: true });
   });
 });
 

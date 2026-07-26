@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, resolve } from "node:path";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type {
   BrowserWindowConstructorOptions,
@@ -219,6 +219,12 @@ const RENDERER_CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".js": "text/javascript; charset=utf-8",
 };
 
+const escapesDirectory = (relativePath: string): boolean =>
+  relativePath.length === 0 ||
+  relativePath === ".." ||
+  relativePath.startsWith(`..${sep}`) ||
+  isAbsolute(relativePath);
+
 export interface RendererProtocol {
   handle(
     scheme: string,
@@ -261,6 +267,7 @@ export const installRendererProtocol = (
     throw new Error("renderer root must be absolute");
   }
   const trustedRoot = resolve(rendererRoot);
+  const realRootPromise = realpath(trustedRoot);
   protocol.handle(RENDERER_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
@@ -279,18 +286,24 @@ export const installRendererProtocol = (
       if (pathname.includes("\0")) {
         return new Response(null, { status: 404 });
       }
+      const realRoot = await realRootPromise;
       const candidate = resolve(trustedRoot, `.${pathname}`);
-      const child = relative(trustedRoot, candidate);
-      const contentType = RENDERER_CONTENT_TYPES[extname(candidate)];
+      const lexicalChild = relative(trustedRoot, candidate);
+      if (escapesDirectory(lexicalChild)) {
+        return new Response(null, { status: 404 });
+      }
+      const realCandidate = await realpath(candidate);
+      const realChild = relative(realRoot, realCandidate);
+      const metadata = await lstat(realCandidate);
+      const contentType = RENDERER_CONTENT_TYPES[extname(realCandidate)];
       if (
-        child.length === 0 ||
-        child.startsWith("..") ||
-        isAbsolute(child) ||
+        escapesDirectory(realChild) ||
+        !metadata.isFile() ||
         contentType === undefined
       ) {
         return new Response(null, { status: 404 });
       }
-      return new Response(await readFile(candidate), {
+      return new Response(await readFile(realCandidate), {
         headers: {
           "Content-Type": contentType,
           "X-Content-Type-Options": "nosniff",

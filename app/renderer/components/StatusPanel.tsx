@@ -5,16 +5,19 @@ import { safeDiagnostic } from "../model/safe-error";
 
 interface StatusRowProps {
   label: string;
+  state?: string;
   testId?: string;
   tone?: "success" | "warning" | "danger";
   value: ReactNode;
 }
 
-const StatusRow = ({ label, testId, tone, value }: StatusRowProps) => (
+const StatusRow = ({ label, state, testId, tone, value }: StatusRowProps) => (
   <div className="status-row">
     <dt>{label}</dt>
     <dd className={tone === undefined ? undefined : `tone-${tone}`}>
-      <span data-testid={testId}>{value}</span>
+      <span data-state={state} data-testid={testId}>
+        {value}
+      </span>
     </dd>
   </div>
 );
@@ -47,6 +50,11 @@ const recordingTone = (state: AppState): StatusRowProps["tone"] | undefined =>
       : state.recording.state === "paused"
         ? "warning"
         : undefined;
+
+const connectionState = (state: AppState): string =>
+  state.connection === "streaming" && state.paused
+    ? "paused"
+    : state.connection;
 
 const formatDuration = (nanoseconds: string): string => {
   const totalSeconds = Number(BigInt(nanoseconds) / 1_000_000_000n);
@@ -94,7 +102,11 @@ const StatusPanelView = ({ state }: { state: AppState }) => {
           label="Connection"
           tone={connectionTone(state)}
           value={
-            <output aria-live="polite" data-testid="connection-state">
+            <output
+              aria-live="polite"
+              data-state={connectionState(state)}
+              data-testid="connection-state"
+            >
               {formatConnection(state)}
             </output>
           }
@@ -145,6 +157,7 @@ const StatusPanelView = ({ state }: { state: AppState }) => {
         <div className="status-divider" aria-hidden="true" />
         <StatusRow
           label="Recording"
+          state={state.recording.state}
           testId="recording-state"
           tone={recordingTone(state)}
           value={recordingLabel(state)}

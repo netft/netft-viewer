@@ -226,6 +226,7 @@ const ActionsView = ({
         <button
           aria-busy={pausePending}
           className="button button-secondary"
+          data-action={state.paused ? "resume" : "pause"}
           data-testid="pause-action"
           disabled={disabled || !streaming || transitionPending}
           onClick={() => {
@@ -255,6 +256,7 @@ const ActionsView = ({
           <button
             aria-busy={stopPending}
             className="button button-danger-outline"
+            data-action="stop"
             data-testid="recording-action"
             disabled={disabled || stopPending}
             onClick={() => {
@@ -268,6 +270,7 @@ const ActionsView = ({
           <button
             aria-busy={recordPending}
             className="button button-danger"
+            data-action="record"
             data-testid="recording-action"
             disabled={
               disabled ||

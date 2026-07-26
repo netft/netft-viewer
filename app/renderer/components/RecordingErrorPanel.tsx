@@ -38,7 +38,10 @@ export const RecordingErrorPanel = ({ state }: RecordingErrorPanelProps) => {
         </div>
         <div>
           <dt>Partial recording</dt>
-          <dd data-testid="recording-error-partial">
+          <dd
+            data-state={partialPath.length > 0 ? "available" : "unavailable"}
+            data-testid="recording-error-partial"
+          >
             <code>{partialPath || "Unavailable"}</code>
           </dd>
         </div>

@@ -41,6 +41,7 @@ const BackendErrorViewComponent = ({ api, state }: BackendErrorViewProps) => {
     <main
       aria-labelledby="backend-error-title"
       className="backend-error-view"
+      data-state="failed"
       data-testid="backend-error-view"
     >
       <div className="backend-error-heading">
@@ -79,6 +80,7 @@ const BackendErrorViewComponent = ({ api, state }: BackendErrorViewProps) => {
       <button
         aria-busy={pending}
         className="button button-secondary backend-retry"
+        data-action="retry"
         data-testid="retry-backend"
         disabled={pending}
         onClick={retry}

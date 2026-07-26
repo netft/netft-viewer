@@ -12,10 +12,20 @@ const evidencePath = (name: string): string =>
 const connect = async (viewer: ViewerFixture): Promise<void> => {
   await viewer.page.getByTestId("sensor-host-input").fill("198.51.100.10");
   await viewer.page.getByTestId("connection-action").click();
-  await expect(viewer.page.getByTestId("connection-state")).toHaveText(
-    "Streaming",
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "streaming",
   );
 };
+
+const expectRecordingState = (
+  viewer: ViewerFixture,
+  state: string,
+): Promise<void> =>
+  expect(viewer.page.getByTestId("recording-state")).toHaveAttribute(
+    "data-state",
+    state,
+  );
 
 const expectRendererHealthy = (viewer: ViewerFixture): void => {
   expect(viewer.pageErrors).toEqual([]);
@@ -64,6 +74,24 @@ test("packaged app renders live values and both chart layouts", async ({
     viewer.page.locator('[data-testid^="chart-surface-"]'),
   ).toHaveCount(6);
   await viewer.page.screenshot({ path: evidencePath("live-panels.png") });
+
+  await expect(viewer.page.getByTestId("connection-action")).toHaveAttribute(
+    "data-action",
+    "disconnect",
+  );
+  await viewer.page.getByTestId("connection-action").click();
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "disconnected",
+  );
+  expect((await viewer.fakeCompanion.state()).connected).toBe(false);
+  await expect(viewer.page.getByTestId("connection-action")).toHaveAttribute(
+    "data-action",
+    "connect",
+  );
+  await expect
+    .poll(async () => (await viewer.fakeCompanion.state()).connected)
+    .toBe(false);
   expectRendererHealthy(viewer);
 });
 
@@ -90,22 +118,29 @@ test("dialogs, Pause, and CSV acceptance stay authoritative", async ({
     saveResponses: [{ canceled: true, filePath: "" }],
   });
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText("Idle");
+  await expectRecordingState(viewer, "idle");
 
   const recordingPath = join(viewer.tempDirectory, "accepted.csv");
   await viewer.setDialogs({
     saveResponses: [{ canceled: false, filePath: recordingPath }],
   });
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText(
-    "Recording",
+  await expectRecordingState(viewer, "recording");
+  await expect(viewer.page.getByTestId("recording-action")).toHaveAttribute(
+    "data-action",
+    "stop",
   );
 
   await viewer.fakeCompanion.emitSample(1);
   await expect(viewer.page.getByTestId("raw-Fx")).toHaveText("1");
   await viewer.page.getByTestId("pause-action").click();
-  await expect(viewer.page.getByTestId("connection-state")).toHaveText(
-    "Paused",
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "paused",
+  );
+  await expect(viewer.page.getByTestId("pause-action")).toHaveAttribute(
+    "data-action",
+    "resume",
   );
   const frozenPointCount =
     (await viewer.page
@@ -123,13 +158,22 @@ test("dialogs, Pause, and CSV acceptance stay authoritative", async ({
   await viewer.page.screenshot({ path: evidencePath("recording-paused.png") });
 
   await viewer.page.getByTestId("pause-action").click();
-  await expect(viewer.page.getByTestId("connection-state")).toHaveText(
-    "Streaming",
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "streaming",
+  );
+  await expect(viewer.page.getByTestId("pause-action")).toHaveAttribute(
+    "data-action",
+    "pause",
   );
   await viewer.fakeCompanion.emitSample(3);
   await expect(viewer.page.getByTestId("raw-Fx")).toHaveText("3");
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText("Idle");
+  await expectRecordingState(viewer, "idle");
+  await expect(viewer.page.getByTestId("recording-action")).toHaveAttribute(
+    "data-action",
+    "record",
+  );
   expect(await recordedSequences(recordingPath)).toEqual([1, 3]);
 
   const overwritePath = join(viewer.tempDirectory, "overwrite.csv");
@@ -139,18 +183,16 @@ test("dialogs, Pause, and CSV acceptance stay authoritative", async ({
     saveResponses: [{ canceled: false, filePath: overwritePath }],
   });
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText("Idle");
+  await expectRecordingState(viewer, "idle");
   expect(await readFile(overwritePath, "utf8")).toBe("preserve\n");
   await viewer.setDialogs({
     messageResponses: [1],
     saveResponses: [{ canceled: false, filePath: overwritePath }],
   });
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText(
-    "Recording",
-  );
+  await expectRecordingState(viewer, "recording");
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText("Idle");
+  await expectRecordingState(viewer, "idle");
   expect(await readFile(overwritePath, "utf8")).toContain("sequence,");
   expectRendererHealthy(viewer);
 });
@@ -164,17 +206,15 @@ test("recording failures retain a recoverable partial file", async ({
     saveResponses: [{ canceled: false, filePath: recordingPath }],
   });
   await viewer.page.getByTestId("recording-action").click();
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText(
-    "Recording",
-  );
+  await expectRecordingState(viewer, "recording");
   await viewer.fakeCompanion.emitSample(9);
   const failure = await viewer.fakeCompanion.triggerRecordingError();
 
-  await expect(viewer.page.getByTestId("recording-state")).toHaveText("Error");
+  await expectRecordingState(viewer, "error");
   await expect(viewer.page.getByTestId("recording-error-detail")).toBeVisible();
   await expect(
     viewer.page.getByTestId("recording-error-partial"),
-  ).not.toHaveText("Unavailable");
+  ).toHaveAttribute("data-state", "available");
   expect((await stat(failure.partialPath)).isFile()).toBe(true);
   await expect(viewer.page.getByTestId("chart-workspace")).toBeVisible();
   await viewer.page.screenshot({ path: evidencePath("recording-error.png") });
@@ -190,23 +230,31 @@ test("backend restart and explicit Retry never reconnect the sensor", async ({
   await viewer.fakeCompanion.exit();
   const restarted = await viewer.fakeCompanion.endpoint(initial.pid);
 
-  await expect(viewer.page.getByTestId("connection-state")).toHaveText(
-    "Disconnected",
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "disconnected",
   );
   await expect(viewer.page.getByTestId("connection-action")).toBeEnabled();
   expect((await viewer.fakeCompanion.state()).connected).toBe(false);
 
   await viewer.fakeCompanion.failRestarts();
-  await expect(viewer.page.getByTestId("backend-error-view")).toBeVisible({
-    timeout: 10_000,
-  });
+  await expect(viewer.page.getByTestId("backend-error-view")).toHaveAttribute(
+    "data-state",
+    "failed",
+    { timeout: 10_000 },
+  );
+  await expect(viewer.page.getByTestId("retry-backend")).toHaveAttribute(
+    "data-action",
+    "retry",
+  );
   await viewer.page.screenshot({ path: evidencePath("backend-failed.png") });
   await viewer.clearFailureSentinel();
   await viewer.page.getByTestId("retry-backend").click();
   await viewer.fakeCompanion.endpoint(restarted.pid);
   await expect(viewer.page.getByTestId("backend-error-view")).toHaveCount(0);
-  await expect(viewer.page.getByTestId("connection-state")).toHaveText(
-    "Disconnected",
+  await expect(viewer.page.getByTestId("connection-state")).toHaveAttribute(
+    "data-state",
+    "disconnected",
   );
   await expect(viewer.page.getByTestId("connection-action")).toBeEnabled();
   expect((await viewer.fakeCompanion.state()).connected).toBe(false);
