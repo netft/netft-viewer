@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
 
 import forgeConfig from "../../forge.config";
 import {
+  bindApplicationLifecycle,
   CONTENT_SECURITY_POLICY,
   createViewerWindow,
   installSessionSecurity,
@@ -114,6 +115,40 @@ describe("Electron window security", () => {
     expect(openHandler({ url: "file:///application/index.html" })).toEqual({
       action: "deny",
     });
+  });
+
+  it("rejects a remote-host file URL even when its path matches", async () => {
+    const window = (await createViewerWindow({
+      BrowserWindow: FakeBrowserWindow,
+      preloadPath: resolve("preload.js"),
+      rendererUrl: "file:///application/index.html",
+    })) as FakeBrowserWindow;
+    const navigation = { preventDefault: vi.fn() };
+
+    window.webContents.emit(
+      "will-navigate",
+      navigation,
+      "file://remote-host/application/index.html",
+    );
+
+    expect(navigation.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a changed packaged-file fragment by explicit policy", async () => {
+    const window = (await createViewerWindow({
+      BrowserWindow: FakeBrowserWindow,
+      preloadPath: resolve("preload.js"),
+      rendererUrl: "file:///application/index.html",
+    })) as FakeBrowserWindow;
+    const navigation = { preventDefault: vi.fn() };
+
+    window.webContents.emit(
+      "will-navigate",
+      navigation,
+      "file:///application/index.html#unexpected",
+    );
+
+    expect(navigation.preventDefault).toHaveBeenCalledOnce();
   });
 
   it("shows the shell only after local renderer content is ready", async () => {
@@ -304,5 +339,145 @@ describe("narrow renderer IPC", () => {
     expect(ipcRenderer.removeListener).toHaveBeenCalledOnce();
     expect(api).not.toHaveProperty("ipcRenderer");
     expect(api.startRecording.length).toBe(0);
+  });
+
+  it("isolates a destroyed renderer and removes its supervisor subscription", () => {
+    const trusted = new FakeWebContents();
+    const unsubscribe = vi.fn();
+    const supervisorListener: Array<(event: { type: string }) => void> = [];
+    const supervisor = {
+      command: vi.fn(),
+      retry: vi.fn(),
+      subscribe: vi.fn((listener) => {
+        supervisorListener.push(listener);
+        return unsubscribe;
+      }),
+    };
+    const removeHandler = vi.fn();
+    const cleanup = registerIpcHandlers({
+      ipcMain: {
+        handle: vi.fn(),
+        removeHandler,
+      },
+      trustedWebContents: trusted,
+      supervisor,
+      selectRecordingPath: async () => undefined,
+    });
+    removeHandler.mockClear();
+    cleanup();
+    cleanup();
+    trusted.send.mockImplementation(() => {
+      throw new Error("renderer destroyed");
+    });
+
+    expect(() =>
+      supervisorListener[0]?.({ type: "backend_disconnected" }),
+    ).not.toThrow();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(removeHandler).toHaveBeenCalledTimes(
+      Object.values(IPC_CHANNELS).length - 1,
+    );
+  });
+});
+
+describe("application lifecycle", () => {
+  it("cleans renderer IPC when its web contents is destroyed", () => {
+    const window = new FakeBrowserWindow({
+      webPreferences: {},
+    });
+    const cleanupIpc = vi.fn();
+    const app = Object.assign(new EventEmitter(), {
+      quit: vi.fn<() => void>(),
+    });
+
+    bindApplicationLifecycle({
+      app,
+      window,
+      platform: "linux",
+      cleanupIpc,
+      supervisor: { stop: vi.fn(async () => {}) },
+      closeLogs: vi.fn(),
+    });
+    window.webContents.emit("destroyed");
+    window.emit("closed");
+
+    expect(cleanupIpc).toHaveBeenCalledOnce();
+  });
+
+  it("stops the backend on window-all-closed and applies platform quit policy", async () => {
+    const window = new FakeBrowserWindow({
+      webPreferences: {},
+    });
+    const app = Object.assign(new EventEmitter(), {
+      quit: vi.fn<() => void>(),
+    });
+    const stop = vi.fn(async () => {});
+    const closeLogs = vi.fn();
+
+    bindApplicationLifecycle({
+      app,
+      window,
+      platform: "linux",
+      cleanupIpc: vi.fn(),
+      supervisor: { stop },
+      closeLogs,
+    });
+    app.emit("window-all-closed");
+    await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeLogs).toHaveBeenCalledOnce();
+  });
+
+  it("stops without quitting when the last macOS window closes", async () => {
+    const window = new FakeBrowserWindow({
+      webPreferences: {},
+    });
+    const app = Object.assign(new EventEmitter(), {
+      quit: vi.fn<() => void>(),
+    });
+    const stop = vi.fn(async () => {});
+
+    bindApplicationLifecycle({
+      app,
+      window,
+      platform: "darwin",
+      cleanupIpc: vi.fn(),
+      supervisor: { stop },
+      closeLogs: vi.fn(),
+    });
+    app.emit("window-all-closed");
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+
+    expect(app.quit).not.toHaveBeenCalled();
+  });
+
+  it("stops and cleans resources before an explicit application quit", async () => {
+    const window = new FakeBrowserWindow({
+      webPreferences: {},
+    });
+    const app = Object.assign(new EventEmitter(), {
+      quit: vi.fn<() => void>(),
+    });
+    const cleanupIpc = vi.fn();
+    const stop = vi.fn(async () => {});
+    const closeLogs = vi.fn();
+    const preventDefault = vi.fn();
+
+    bindApplicationLifecycle({
+      app,
+      window,
+      platform: "linux",
+      cleanupIpc,
+      supervisor: { stop },
+      closeLogs,
+    });
+    app.emit("before-quit", { preventDefault });
+    await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(cleanupIpc).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeLogs).toHaveBeenCalledOnce();
   });
 });

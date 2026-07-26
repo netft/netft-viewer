@@ -90,6 +90,8 @@ export interface CompanionSupervisorSnapshot {
 interface PendingRequest {
   expectedType: "hello" | "command_result";
   commandType: "hello" | CompanionCommandType | "shutdown";
+  child: CompanionProcess;
+  generation: number;
   resolve: (event: CompanionEvent) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -103,6 +105,7 @@ interface ProcessListeners {
 }
 
 class BoundedLineFramer {
+  private readonly decoder = new TextDecoder("utf-8", { fatal: true });
   private chunks: Buffer[] = [];
   private byteLength = 0;
 
@@ -123,7 +126,9 @@ class BoundedLineFramer {
       if (newline < 0) {
         return lines;
       }
-      lines.push(Buffer.concat(this.chunks, this.byteLength).toString("utf8"));
+      lines.push(
+        this.decoder.decode(Buffer.concat(this.chunks, this.byteLength)),
+      );
       this.reset();
       pending = pending.subarray(newline + 1);
     }
@@ -164,6 +169,8 @@ export class CompanionSupervisor {
   private readonly subscribers = new Set<(event: RendererEvent) => void>();
   private readonly pending = new Map<string, PendingRequest>();
   private process: CompanionProcess | undefined;
+  private processGeneration = 0;
+  private nextGeneration = 0;
   private listeners: ProcessListeners | undefined;
   private snapshotValue: CompanionSupervisorSnapshot = {
     state: "stopped",
@@ -230,7 +237,13 @@ export class CompanionSupervisor {
     if (this.snapshotValue.state !== "running" || this.process === undefined) {
       throw new Error("backend is not running");
     }
-    const event = await this.sendRequest(type, payload, "command_result");
+    const event = await this.sendRequest(
+      type,
+      payload,
+      "command_result",
+      this.process,
+      this.processGeneration,
+    );
     if (event.type !== "command_result" || event.payload.commandType !== type) {
       throw new Error("command result does not match request");
     }
@@ -257,7 +270,13 @@ export class CompanionSupervisor {
       state: "stopping",
     });
     try {
-      await this.sendRequest("shutdown", {}, "command_result");
+      await this.sendRequest(
+        "shutdown",
+        {},
+        "command_result",
+        child,
+        this.processGeneration,
+      );
       child.stdin.end();
     } catch {
       child.kill();
@@ -316,8 +335,16 @@ export class CompanionSupervisor {
       windowsHide: true,
     });
     this.process = child;
-    this.attach(child);
-    const event = await this.sendRequest("hello", {}, "hello");
+    const generation = ++this.nextGeneration;
+    this.processGeneration = generation;
+    this.attach(child, generation);
+    const event = await this.sendRequest(
+      "hello",
+      {},
+      "hello",
+      child,
+      generation,
+    );
     if (
       event.type !== "hello" ||
       event.payload.protocolMajor !== 1 ||
@@ -332,25 +359,38 @@ export class CompanionSupervisor {
     type: "hello" | CompanionCommandType | "shutdown",
     payload: Record<string, unknown>,
     expectedType: "hello" | "command_result",
+    child: CompanionProcess,
+    generation: number,
   ): Promise<CompanionEvent> {
-    const child = this.process;
-    if (child === undefined) {
+    if (!this.isActive(child, generation)) {
       return Promise.reject(new Error("backend process is unavailable"));
     }
     const requestId = randomUUID();
     return new Promise<CompanionEvent>((resolvePromise, rejectPromise) => {
       const timer = setTimeout(() => {
+        const pending = this.pending.get(requestId);
+        if (
+          pending === undefined ||
+          pending.child !== child ||
+          pending.generation !== generation
+        ) {
+          return;
+        }
         this.pending.delete(requestId);
-        rejectPromise(new Error("companion request timed out"));
-        this.failProcess(new Error("companion request timed out"));
+        const error = new Error("companion request timed out");
+        rejectPromise(error);
+        this.failProcess(child, generation, error);
       }, this.options.requestTimeoutMs);
-      this.pending.set(requestId, {
+      const request: PendingRequest = {
         expectedType,
         commandType: type,
+        child,
+        generation,
         resolve: resolvePromise,
         reject: rejectPromise,
         timer,
-      });
+      };
+      this.pending.set(requestId, request);
       const frame = JSON.stringify({
         protocol: { major: 1, minor: 0 },
         type,
@@ -362,27 +402,30 @@ export class CompanionSupervisor {
         if (error !== null && error !== undefined) {
           const writeError = errorFrom(error);
           const pending = this.pending.get(requestId);
-          if (pending !== undefined) {
+          if (pending === request) {
             clearTimeout(pending.timer);
             this.pending.delete(requestId);
             pending.reject(writeError);
           }
-          this.failProcess(writeError);
+          this.failProcess(child, generation, writeError);
         }
       });
     });
   }
 
-  private attach(child: CompanionProcess): void {
+  private attach(child: CompanionProcess, generation: number): void {
     const framer = new BoundedLineFramer();
     const listeners: ProcessListeners = {
       stdout: (chunk) => {
         try {
           for (const line of framer.push(chunk)) {
-            this.receive(parseCompanionEventLine(line));
+            if (!this.isActive(child, generation)) {
+              break;
+            }
+            this.receive(parseCompanionEventLine(line), child, generation);
           }
         } catch (error) {
-          this.failProcess(errorFrom(error));
+          this.failProcess(child, generation, errorFrom(error));
         }
       },
       stderr: (chunk) => {
@@ -393,11 +436,12 @@ export class CompanionSupervisor {
         }
       },
       error: (error) => {
-        this.handleTermination(child, error, false);
+        this.handleTermination(child, generation, error, false);
       },
       exit: (code) => {
         this.handleTermination(
           child,
+          generation,
           new Error(`companion exited with code ${String(code)}`),
           code === 0,
         );
@@ -410,20 +454,34 @@ export class CompanionSupervisor {
     child.once("exit", listeners.exit);
   }
 
-  private receive(event: CompanionEvent): void {
+  private receive(
+    event: CompanionEvent,
+    child: CompanionProcess,
+    generation: number,
+  ): void {
     if (event.type === "hello" || event.type === "command_result") {
       if (!("requestId" in event) || typeof event.requestId !== "string") {
-        this.failProcess(new Error("uncorrelated companion response"));
+        this.failProcess(
+          child,
+          generation,
+          new Error("uncorrelated companion response"),
+        );
         return;
       }
       const pending = this.pending.get(event.requestId);
       if (
         pending === undefined ||
+        pending.child !== child ||
+        pending.generation !== generation ||
         pending.expectedType !== event.type ||
         (event.type === "command_result" &&
           event.payload.commandType !== pending.commandType)
       ) {
-        this.failProcess(new Error("uncorrelated companion response"));
+        this.failProcess(
+          child,
+          generation,
+          new Error("uncorrelated companion response"),
+        );
         return;
       }
       clearTimeout(pending.timer);
@@ -434,21 +492,25 @@ export class CompanionSupervisor {
     this.emit(event);
   }
 
-  private failProcess(error: Error): void {
-    const child = this.process;
-    if (child === undefined) {
+  private failProcess(
+    child: CompanionProcess,
+    generation: number,
+    error: Error,
+  ): void {
+    if (!this.isActive(child, generation)) {
       return;
     }
     child.kill();
-    this.handleTermination(child, error, false);
+    this.handleTermination(child, generation, error, false);
   }
 
   private handleTermination(
     child: CompanionProcess,
+    generation: number,
     error: Error,
     normalExit: boolean,
   ): void {
-    if (this.process !== child) {
+    if (!this.isActive(child, generation)) {
       return;
     }
     this.rejectPending(error);
@@ -482,6 +544,7 @@ export class CompanionSupervisor {
     const child = this.process;
     const listeners = this.listeners;
     this.process = undefined;
+    this.processGeneration = 0;
     this.listeners = undefined;
     if (child === undefined || listeners === undefined) {
       return;
@@ -506,7 +569,15 @@ export class CompanionSupervisor {
 
   private emit(event: RendererEvent): void {
     for (const subscriber of this.subscribers) {
-      subscriber(event);
+      try {
+        subscriber(event);
+      } catch {
+        // Renderer-side failures must not destabilize process supervision.
+      }
     }
+  }
+
+  private isActive(child: CompanionProcess, generation: number): boolean {
+    return this.process === child && this.processGeneration === generation;
   }
 }

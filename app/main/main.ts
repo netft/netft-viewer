@@ -42,6 +42,7 @@ export interface ViewerWebContents {
     event: "will-attach-webview",
     listener: (event: NavigationEvent) => void,
   ): this;
+  once(event: "destroyed", listener: () => void): this;
   setWindowOpenHandler(
     handler: (details: { url: string }) => WindowOpenResult,
   ): void;
@@ -51,6 +52,7 @@ export interface ViewerWebContents {
 export interface BrowserWindowLike {
   readonly webContents: ViewerWebContents;
   once(event: "ready-to-show", listener: () => void): this;
+  once(event: "closed", listener: () => void): this;
   show(): void;
   loadURL(url: string): Promise<void>;
 }
@@ -105,10 +107,16 @@ const equivalentRendererLocation = (
     return (
       candidate.protocol === allowed.protocol &&
       candidate.origin === allowed.origin &&
+      candidate.host === allowed.host &&
+      candidate.hostname === allowed.hostname &&
+      candidate.port === allowed.port &&
       candidate.pathname === allowed.pathname &&
       candidate.search === allowed.search &&
-      candidate.username.length === 0 &&
-      candidate.password.length === 0
+      candidate.hash === allowed.hash &&
+      allowed.username.length === 0 &&
+      allowed.password.length === 0 &&
+      candidate.username === allowed.username &&
+      candidate.password === allowed.password
     );
   } catch {
     return false;
@@ -203,6 +211,89 @@ export const resolveRendererAssetUrl = (
     join(buildDirectory, "..", "renderer", rendererName, "index.html"),
   ).toString();
 
+interface QuitEvent {
+  preventDefault(): void;
+}
+
+export interface ViewerApplication {
+  on(event: "before-quit", listener: (event: QuitEvent) => void): unknown;
+  on(event: "window-all-closed", listener: () => void): unknown;
+  quit(): void;
+}
+
+export interface BindApplicationLifecycleOptions {
+  app: ViewerApplication;
+  window: BrowserWindowLike;
+  platform: NodeJS.Platform;
+  cleanupIpc: () => void;
+  supervisor: Pick<CompanionSupervisor, "stop">;
+  closeLogs: () => void;
+}
+
+export const bindApplicationLifecycle = (
+  options: BindApplicationLifecycleOptions,
+): void => {
+  let rendererCleaned = false;
+  let shutdownPromise: Promise<void> | undefined;
+  let allowQuit = false;
+  let quitRequested = false;
+
+  const cleanupRenderer = (): void => {
+    if (rendererCleaned) {
+      return;
+    }
+    rendererCleaned = true;
+    try {
+      options.cleanupIpc();
+    } catch {
+      // Cleanup is best-effort and must not block backend shutdown.
+    }
+  };
+  const shutdown = (): Promise<void> => {
+    cleanupRenderer();
+    shutdownPromise ??= Promise.resolve()
+      .then(async () => options.supervisor.stop())
+      .catch(() => {
+        // Backend shutdown failure must not trap the application.
+      })
+      .finally(() => {
+        try {
+          options.closeLogs();
+        } catch {
+          // Log cleanup is best-effort during application teardown.
+        }
+      });
+    return shutdownPromise;
+  };
+  const requestQuitAfterShutdown = (): void => {
+    if (quitRequested) {
+      return;
+    }
+    quitRequested = true;
+    void shutdown().then(() => {
+      allowQuit = true;
+      options.app.quit();
+    });
+  };
+
+  options.window.webContents.once("destroyed", cleanupRenderer);
+  options.window.once("closed", cleanupRenderer);
+  options.app.on("window-all-closed", () => {
+    if (options.platform === "darwin") {
+      void shutdown();
+      return;
+    }
+    requestQuitAfterShutdown();
+  });
+  options.app.on("before-quit", (event) => {
+    if (allowQuit) {
+      return;
+    }
+    event.preventDefault();
+    requestQuitAfterShutdown();
+  });
+};
+
 const boot = async (): Promise<void> => {
   const { app, BrowserWindow, dialog, ipcMain, session } =
     await import("electron");
@@ -259,20 +350,15 @@ const boot = async (): Promise<void> => {
       return result.response === 1;
     },
   });
-  await supervisor.start();
-  let quitting = false;
-  app.on("before-quit", (event) => {
-    if (quitting) {
-      return;
-    }
-    event.preventDefault();
-    quitting = true;
-    cleanupIpc();
-    void supervisor.stop().finally(() => {
-      logs.close();
-      app.quit();
-    });
+  bindApplicationLifecycle({
+    app,
+    window,
+    platform: process.platform,
+    cleanupIpc,
+    supervisor,
+    closeLogs: () => logs.close(),
   });
+  await supervisor.start();
 };
 
 if (process.versions.electron !== undefined) {

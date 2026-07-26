@@ -1,10 +1,16 @@
 import {
-  appendFileSync,
-  existsSync,
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   renameSync,
-  statSync,
   unlinkSync,
+  writeSync,
+  type Stats,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
@@ -43,6 +49,28 @@ const boundedEntry = (input: string): Buffer => {
   ]);
 };
 
+const lstatIfPresent = (path: string): Stats | undefined => {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+const requireRegularFileOrMissing = (path: string): Stats | undefined => {
+  const metadata = lstatIfPresent(path);
+  if (
+    metadata !== undefined &&
+    (metadata.isSymbolicLink() || !metadata.isFile())
+  ) {
+    throw new Error(`refusing unsafe log target: ${basename(path)}`);
+  }
+  return metadata;
+};
+
 export class LogStore {
   readonly path: string;
 
@@ -63,19 +91,49 @@ export class LogStore {
     if (maximumBytes < MAX_ENTRY_BYTES || retainedFiles < 1) {
       throw new Error("invalid log retention limits");
     }
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    this.path = resolve(directory, filename);
-    this.currentBytes = existsSync(this.path) ? statSync(this.path).size : 0;
+    const resolvedDirectory = resolve(directory);
+    mkdirSync(resolvedDirectory, { recursive: true, mode: 0o700 });
+    const directoryMetadata = lstatSync(resolvedDirectory);
+    if (
+      directoryMetadata.isSymbolicLink() ||
+      !directoryMetadata.isDirectory()
+    ) {
+      throw new Error("refusing unsafe log directory");
+    }
+    if (process.platform !== "win32") {
+      chmodSync(resolvedDirectory, 0o700);
+    }
+    this.path = join(resolvedDirectory, filename);
+    this.validateTargets();
+    this.currentBytes = requireRegularFileOrMissing(this.path)?.size ?? 0;
   }
 
   append(input: string | Buffer): void {
     const entry = boundedEntry(
       typeof input === "string" ? input : input.toString("utf8"),
     );
+    this.validateTargets();
     if (this.currentBytes + entry.byteLength > this.maximumBytes) {
       this.rotate();
     }
-    appendFileSync(this.path, entry, { mode: 0o600 });
+    const noFollow =
+      process.platform === "win32" ? 0 : (constants.O_NOFOLLOW ?? 0);
+    const descriptor = openSync(
+      this.path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | noFollow,
+      0o600,
+    );
+    try {
+      if (!fstatSync(descriptor).isFile()) {
+        throw new Error("refusing non-regular log target");
+      }
+      if (process.platform !== "win32") {
+        fchmodSync(descriptor, 0o600);
+      }
+      writeSync(descriptor, entry);
+    } finally {
+      closeSync(descriptor);
+    }
     this.currentBytes += entry.byteLength;
   }
 
@@ -91,19 +149,27 @@ export class LogStore {
   }
 
   private rotate(): void {
+    this.validateTargets();
     const oldest = this.rotatedPath(this.retainedFiles - 1);
-    if (existsSync(oldest)) {
+    if (lstatIfPresent(oldest) !== undefined) {
       unlinkSync(oldest);
     }
     for (let index = this.retainedFiles - 2; index >= 1; index -= 1) {
       const source = this.rotatedPath(index);
-      if (existsSync(source)) {
+      if (lstatIfPresent(source) !== undefined) {
         renameSync(source, this.rotatedPath(index + 1));
       }
     }
-    if (existsSync(this.path)) {
+    if (lstatIfPresent(this.path) !== undefined) {
       renameSync(this.path, this.rotatedPath(1));
     }
     this.currentBytes = 0;
+  }
+
+  private validateTargets(): void {
+    requireRegularFileOrMissing(this.path);
+    for (let index = 1; index < this.retainedFiles; index += 1) {
+      requireRegularFileOrMissing(this.rotatedPath(index));
+    }
   }
 }

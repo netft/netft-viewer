@@ -1,5 +1,15 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -346,6 +356,164 @@ describe("CompanionSupervisor", () => {
 
     expect(process.kill).toHaveBeenCalled();
   });
+
+  it("does not let a stale child write callback terminate its replacement", async () => {
+    const first = new FakeProcess();
+    const second = new FakeProcess();
+    respondToHello(first);
+    respondToHello(second);
+    const processes = [first, second];
+    const supervisor = supervisorWith(() => {
+      const next = processes.shift();
+      if (next === undefined) {
+        throw new Error("unexpected spawn");
+      }
+      return next;
+    });
+    await supervisor.start();
+    let finishWrite: ((error?: Error | null) => void) | undefined;
+    first.stdin.write = vi.fn(
+      (_chunk: unknown, callback: (error?: Error | null) => void): boolean => {
+        finishWrite = callback;
+        return true;
+      },
+    ) as unknown as typeof first.stdin.write;
+    const request = supervisor.command("disconnect", {});
+    const rejection = expect(request).rejects.toThrow();
+
+    first.exit(9);
+    await vi.waitFor(() => expect(supervisor.snapshot().state).toBe("running"));
+    finishWrite?.(new Error("stale write failure"));
+    await rejection;
+
+    expect(second.kill).not.toHaveBeenCalled();
+    expect(supervisor.snapshot().state).toBe("running");
+  });
+
+  it("stops processing frames after the originating generation is invalidated", async () => {
+    const first = new FakeProcess();
+    const second = new FakeProcess();
+    respondToHello(first);
+    respondToHello(second);
+    const processes = [first, second];
+    const supervisor = supervisorWith(() => {
+      const next = processes.shift();
+      if (next === undefined) {
+        throw new Error("unexpected spawn");
+      }
+      return next;
+    });
+    await supervisor.start();
+    const received: string[] = [];
+    supervisor.subscribe((event) => received.push(event.type));
+    const unknownResponse = JSON.stringify({
+      protocol: { major: 1, minor: 0 },
+      type: "command_result",
+      requestId: "unknown-request",
+      monotonicNs: "2",
+      payload: { commandType: "disconnect", success: true },
+    });
+    const staleEvent = JSON.stringify({
+      protocol: { major: 1, minor: 0 },
+      type: "connection_state",
+      monotonicNs: "3",
+      payload: {
+        state: "streaming",
+        paused: false,
+        generation: "7",
+        lastError: "",
+      },
+    });
+
+    first.stdout.write(`${unknownResponse}\n${staleEvent}\n`);
+    await vi.waitFor(() => expect(supervisor.snapshot().state).toBe("running"));
+
+    expect(received).not.toContain("connection_state");
+  });
+
+  it("preserves UTF-8 characters split across stdout chunks", async () => {
+    const process = new FakeProcess();
+    respondToHello(process);
+    const supervisor = supervisorWith(() => process);
+    await supervisor.start();
+    const received: string[] = [];
+    supervisor.subscribe((event) => {
+      if (event.type === "connection_state") {
+        received.push(event.payload.lastError);
+      }
+    });
+    const frame = Buffer.from(
+      `${JSON.stringify({
+        protocol: { major: 1, minor: 0 },
+        type: "connection_state",
+        monotonicNs: "2",
+        payload: {
+          state: "streaming",
+          paused: false,
+          generation: "1",
+          lastError: "测",
+        },
+      })}\n`,
+      "utf8",
+    );
+    const multibyte = frame.indexOf(Buffer.from("测", "utf8"));
+
+    process.stdout.write(frame.subarray(0, multibyte + 1));
+    process.stdout.write(frame.subarray(multibyte + 1));
+
+    expect(received).toEqual(["测"]);
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("isolates a throwing subscriber from the backend and other subscribers", async () => {
+    const process = new FakeProcess();
+    respondToHello(process);
+    const supervisor = supervisorWith(() => process);
+    await supervisor.start();
+    const received: string[] = [];
+    supervisor.subscribe(() => {
+      throw new Error("renderer listener failed");
+    });
+    supervisor.subscribe((event) => received.push(event.type));
+
+    process.stdout.write(
+      `${JSON.stringify({
+        protocol: { major: 1, minor: 0 },
+        type: "connection_state",
+        monotonicNs: "2",
+        payload: {
+          state: "streaming",
+          paused: false,
+          generation: "1",
+          lastError: "",
+        },
+      })}\n`,
+    );
+
+    expect(received).toEqual(["connection_state"]);
+    expect(process.kill).not.toHaveBeenCalled();
+    expect(supervisor.snapshot().state).toBe("running");
+  });
+
+  it("rejects invalid UTF-8 instead of substituting replacement text", async () => {
+    const process = new FakeProcess();
+    respondToHello(process);
+    const supervisor = supervisorWith(() => process);
+    await supervisor.start();
+
+    process.stdout.write(
+      Buffer.concat([
+        Buffer.from(
+          '{"protocol":{"major":1,"minor":0},"type":"connection_state","monotonicNs":"2","payload":{"state":"streaming","paused":false,"generation":"1","lastError":"',
+          "utf8",
+        ),
+        Buffer.from([0xc3, 0x28]),
+        Buffer.from('"}}\n', "utf8"),
+      ]),
+    );
+
+    await vi.waitFor(() => expect(process.kill).toHaveBeenCalled());
+  });
 });
 
 describe("LogStore", () => {
@@ -373,4 +541,51 @@ describe("LogStore", () => {
       expect(contents.join("")).not.toContain(process.env.HOME);
     }
   });
+
+  it("rejects current and rotated symlink targets without following them", () => {
+    const directory = mkdtempSync(join(tmpdir(), "netft-viewer-logs-"));
+    temporaryDirectories.push(directory);
+    const external = join(directory, "external.txt");
+    writeFileSync(external, "preserve");
+    symlinkSync(external, join(directory, "companion.log"));
+
+    expect(() => new LogStore(directory)).toThrow();
+    expect(readFileSync(external, "utf8")).toBe("preserve");
+
+    rmSync(join(directory, "companion.log"));
+    const store = new LogStore(directory, "companion.log", 65_536, 5);
+    store.append("x".repeat(65_000));
+    symlinkSync(external, join(directory, "companion.log.1"));
+    expect(() => store.append("x".repeat(65_000))).toThrow();
+    expect(readFileSync(external, "utf8")).toBe("preserve");
+  });
+
+  it("rejects non-regular current and rotated log targets", () => {
+    const directory = mkdtempSync(join(tmpdir(), "netft-viewer-logs-"));
+    temporaryDirectories.push(directory);
+    const target = join(directory, "companion.log");
+    mkdirSync(target);
+
+    expect(() => new LogStore(directory)).toThrow();
+
+    rmSync(target, { recursive: true });
+    const store = new LogStore(directory);
+    mkdirSync(join(directory, "companion.log.1"));
+
+    expect(() => store.append("diagnostic\n")).toThrow();
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "enforces private POSIX directory and file permissions",
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), "netft-viewer-logs-"));
+      temporaryDirectories.push(directory);
+      chmodSync(directory, 0o777);
+      const store = new LogStore(directory);
+      store.append("diagnostic\n");
+
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+      expect(statSync(store.path).mode & 0o777).toBe(0o600);
+    },
+  );
 });

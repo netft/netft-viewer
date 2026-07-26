@@ -35,6 +35,7 @@ export interface FrameLike {
 
 export interface WebContentsLike {
   readonly mainFrame: FrameLike;
+  isDestroyed?(): boolean;
   send?(channel: string, event: RendererEvent): void;
 }
 
@@ -175,9 +176,21 @@ export const registerIpcHandlers = (
   });
 
   const unsubscribe = options.supervisor.subscribe((event) => {
-    options.trustedWebContents.send?.(IPC_CHANNELS.event, event);
+    try {
+      if (options.trustedWebContents.isDestroyed?.() === true) {
+        return;
+      }
+      options.trustedWebContents.send?.(IPC_CHANNELS.event, event);
+    } catch {
+      // Renderer teardown must not propagate into backend supervision.
+    }
   });
+  let cleaned = false;
   return () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
     unsubscribe();
     for (const channel of registered) {
       options.ipcMain.removeHandler(channel);
