@@ -279,10 +279,6 @@ export const bindApplicationLifecycle = (
   options.window.webContents.once("destroyed", cleanupRenderer);
   options.window.once("closed", cleanupRenderer);
   options.app.on("window-all-closed", () => {
-    if (options.platform === "darwin") {
-      void shutdown();
-      return;
-    }
     requestQuitAfterShutdown();
   });
   options.app.on("before-quit", (event) => {

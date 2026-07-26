@@ -429,7 +429,7 @@ describe("application lifecycle", () => {
     expect(closeLogs).toHaveBeenCalledOnce();
   });
 
-  it("stops without quitting when the last macOS window closes", async () => {
+  it("stops and quits when the last macOS window closes", async () => {
     const window = new FakeBrowserWindow({
       webPreferences: {},
     });
@@ -437,6 +437,7 @@ describe("application lifecycle", () => {
       quit: vi.fn<() => void>(),
     });
     const stop = vi.fn(async () => {});
+    const closeLogs = vi.fn();
 
     bindApplicationLifecycle({
       app,
@@ -444,12 +445,60 @@ describe("application lifecycle", () => {
       platform: "darwin",
       cleanupIpc: vi.fn(),
       supervisor: { stop },
-      closeLogs: vi.fn(),
+      closeLogs,
     });
     app.emit("window-all-closed");
-    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
 
-    expect(app.quit).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeLogs).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces overlapping last-window and explicit quit signals", async () => {
+    const window = new FakeBrowserWindow({
+      webPreferences: {},
+    });
+    let finishStop: (() => void) | undefined;
+    const stop = vi.fn(
+      async () =>
+        new Promise<void>((resolveStop) => {
+          finishStop = resolveStop;
+        }),
+    );
+    const cleanupIpc = vi.fn();
+    const closeLogs = vi.fn();
+    const repeatedQuitPreventDefault = vi.fn();
+    const app = Object.assign(new EventEmitter(), {
+      quit: vi.fn<() => void>(),
+    });
+    app.quit.mockImplementation(() => {
+      app.emit("before-quit", {
+        preventDefault: repeatedQuitPreventDefault,
+      });
+    });
+    const overlappingQuitPreventDefault = vi.fn();
+
+    bindApplicationLifecycle({
+      app,
+      window,
+      platform: "darwin",
+      cleanupIpc,
+      supervisor: { stop },
+      closeLogs,
+    });
+    app.emit("window-all-closed");
+    app.emit("window-all-closed");
+    app.emit("before-quit", {
+      preventDefault: overlappingQuitPreventDefault,
+    });
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    finishStop?.();
+    await vi.waitFor(() => expect(app.quit).toHaveBeenCalledOnce());
+
+    expect(overlappingQuitPreventDefault).toHaveBeenCalledOnce();
+    expect(repeatedQuitPreventDefault).not.toHaveBeenCalled();
+    expect(cleanupIpc).toHaveBeenCalledOnce();
+    expect(closeLogs).toHaveBeenCalledOnce();
   });
 
   it("stops and cleans resources before an explicit application quit", async () => {
