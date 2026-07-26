@@ -1,5 +1,7 @@
-import { memo, useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
+import type { RendererEvent } from "../main/companion-supervisor";
+import { ChartWorkspace } from "./components/ChartWorkspace";
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { LiveWrenchTable } from "./components/LiveWrenchTable";
 import { StatusPanel } from "./components/StatusPanel";
@@ -10,14 +12,6 @@ import {
 } from "./model/app-state";
 import { createRendererEventScheduler } from "./model/event-scheduler";
 import { useViewerTheme } from "./model/viewer-theme";
-
-const PlotWorkspacePlaceholder = memo(() => (
-  <section
-    aria-label="Plot workspace"
-    className="plot-workspace"
-    data-testid="plot-workspace"
-  />
-));
 
 const invoke = (request: Promise<unknown>): void => {
   void request.catch(() => {
@@ -49,10 +43,27 @@ export const App = ({ initialPreferences }: AppProps) => {
     createInitialAppState,
   );
   const theme = useViewerTheme(state.preferences.theme);
+  const chartEventSinkRef = useRef<
+    ((event: RendererEvent) => void) | undefined
+  >(undefined);
+  const registerChartEventSink = useCallback(
+    (sink: (event: RendererEvent) => void) => {
+      chartEventSinkRef.current = sink;
+      return () => {
+        if (chartEventSinkRef.current === sink) {
+          chartEventSinkRef.current = undefined;
+        }
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     const scheduler = createRendererEventScheduler({
-      dispatch,
+      dispatch: (event) => {
+        chartEventSinkRef.current?.(event);
+        dispatch(event);
+      },
       scheduleFrame: scheduleDisplayFrame,
       cancelFrame: cancelDisplayFrame,
     });
@@ -115,7 +126,11 @@ export const App = ({ initialPreferences }: AppProps) => {
           state={state}
         />
       </aside>
-      <PlotWorkspacePlaceholder />
+      <ChartWorkspace
+        registerEventSink={registerChartEventSink}
+        state={state}
+        theme={theme}
+      />
     </div>
   );
 };
