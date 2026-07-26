@@ -15,8 +15,7 @@ const displayUnit = (unit: string): string =>
 const AxisRow = ({ axis, index, state }: AxisRowProps) => {
   const raw = state.wrench.raw[index] ?? 0;
   const value = state.wrench.calibrated[index] ?? 0;
-  const unit =
-    index < 3 ? state.configuration.forceUnit : state.configuration.torqueUnit;
+  const unit = index < 3 ? state.wrench.forceUnit : state.wrench.torqueUnit;
 
   return (
     <tr>

@@ -16,9 +16,13 @@ export const createRendererEventScheduler = (
 ): RendererEventScheduler => {
   let latestWrench: Extract<RendererEvent, { type: "live_wrench" }> | undefined;
   let frameHandle: number | undefined;
+  let frameGeneration = 0;
   let disposed = false;
 
-  const flush = (): void => {
+  const flush = (generation: number): void => {
+    if (generation !== frameGeneration) {
+      return;
+    }
     frameHandle = undefined;
     if (disposed) {
       latestWrench = undefined;
@@ -31,28 +35,45 @@ export const createRendererEventScheduler = (
     }
   };
 
+  const revokePendingWrench = (): void => {
+    frameGeneration += 1;
+    latestWrench = undefined;
+    if (frameHandle !== undefined) {
+      options.cancelFrame(frameHandle);
+      frameHandle = undefined;
+    }
+  };
+
+  const isScopeBoundary = (event: RendererEvent): boolean =>
+    event.type === "configuration_changed" ||
+    event.type === "connection_state" ||
+    event.type === "backend_disconnected" ||
+    event.type === "backend_state";
+
   return {
     push: (event) => {
       if (disposed) {
         return;
       }
       if (event.type !== "live_wrench") {
+        if (isScopeBoundary(event)) {
+          revokePendingWrench();
+        }
         options.dispatch(event);
         return;
       }
       latestWrench = event;
-      frameHandle ??= options.scheduleFrame(flush);
+      if (frameHandle === undefined) {
+        const generation = ++frameGeneration;
+        frameHandle = options.scheduleFrame(() => flush(generation));
+      }
     },
     dispose: () => {
       if (disposed) {
         return;
       }
       disposed = true;
-      latestWrench = undefined;
-      if (frameHandle !== undefined) {
-        options.cancelFrame(frameHandle);
-        frameHandle = undefined;
-      }
+      revokePendingWrench();
     },
   };
 };

@@ -78,6 +78,9 @@ const liveState = (): AppState => ({
     sampleMonotonicNs: "100",
     raw: [-12_345, 6_789, 3_456, -2_345, 1_234, -5_678],
     calibrated: [-12.345, 6.789, 3.456, -2.345, 1.234, -5.678],
+    forceUnit: "N",
+    torqueUnit: "N-mm",
+    configurationRevision: "3",
   },
   configuration: {
     ...createInitialAppState().configuration,
@@ -159,6 +162,26 @@ describe("fixed sensor sidebar", () => {
     expect(screen.getByTestId("value-Tz").textContent).toContain("-5.678 N·mm");
     expect(screen.getByTestId("configuration-revision").textContent).toContain(
       "3",
+    );
+  });
+
+  it("labels a frozen sample with sample-native units after reconfiguration", () => {
+    const state: AppState = {
+      ...liveState(),
+      paused: true,
+      configuration: {
+        ...liveState().configuration,
+        forceUnit: "lbf",
+        torqueUnit: "lbf-in",
+        revision: "4",
+      },
+    };
+    render(<LiveWrenchTable state={state} />);
+
+    expect(screen.getByTestId("value-Fx").textContent).toContain("-12.345 N");
+    expect(screen.getByTestId("value-Tz").textContent).toContain("-5.678 N·mm");
+    expect(screen.getByTestId("configuration-revision").textContent).toContain(
+      "4",
     );
   });
 

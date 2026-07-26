@@ -107,4 +107,49 @@ describe("renderer event scheduler", () => {
     expect(cancelFrame).toHaveBeenCalledWith(9);
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  it("revokes an old sample at a configuration boundary without stealing the next frame", () => {
+    const dispatch = vi.fn();
+    const frames: FrameRequestCallback[] = [];
+    const cancelFrame = vi.fn();
+    let handle = 0;
+    const scheduler = createRendererEventScheduler({
+      dispatch,
+      scheduleFrame: (callback) => {
+        frames.push(callback);
+        handle += 1;
+        return handle;
+      },
+      cancelFrame,
+    });
+    const configuration: RendererEvent = {
+      protocol: { major: 1, minor: 0 },
+      type: "configuration_changed",
+      monotonicNs: "2",
+      payload: {
+        productName: "Updated",
+        countsPerForceUnit: 10,
+        countsPerTorqueUnit: 20,
+        forceUnit: "lbf",
+        torqueUnit: "lbf-in",
+        source: "sensor",
+        revision: "2",
+      },
+    };
+
+    scheduler.push(wrenchEvent(1));
+    scheduler.push(configuration);
+    scheduler.push(wrenchEvent(2));
+    frames[0]?.(16);
+    frames[1]?.(32);
+
+    expect(cancelFrame).toHaveBeenCalledWith(1);
+    expect(dispatch.mock.calls.map(([event]) => event.type)).toEqual([
+      "configuration_changed",
+      "live_wrench",
+    ]);
+    expect(dispatch.mock.calls[1]?.[0]).toMatchObject({
+      payload: { rdtSequence: 2 },
+    });
+  });
 });

@@ -59,6 +59,9 @@ export interface WrenchView {
   sampleMonotonicNs: string;
   raw: [number, number, number, number, number, number];
   calibrated: [number, number, number, number, number, number];
+  forceUnit: string;
+  torqueUnit: string;
+  configurationRevision: string;
 }
 
 export interface RecordingView {
@@ -122,6 +125,9 @@ const emptyWrench = (): WrenchView => ({
   sampleMonotonicNs: "0",
   raw: [0, 0, 0, 0, 0, 0],
   calibrated: [0, 0, 0, 0, 0, 0],
+  forceUnit: "unknown",
+  torqueUnit: "unknown",
+  configurationRevision: "0",
 });
 
 const emptyRecording = (): RecordingView => ({
@@ -171,6 +177,15 @@ const clearSensorIdentity = (state: AppState): AppState => ({
   },
   configuration: emptyConfiguration(),
   lastErrorSequence: null,
+});
+
+const clearTransientMeasurement = (state: AppState): AppState => ({
+  ...state,
+  wrench: emptyWrench(),
+  plot: {
+    lastBatch: null,
+    lastMonotonicNs: "0",
+  },
 });
 
 const clearLiveSession = (state: AppState): AppState => {
@@ -254,11 +269,13 @@ const reduceConnection = (
   ) {
     return state;
   }
-  const resetIdentity =
-    generationOrder > 0 ||
-    (event.payload.state === "reconnecting" &&
-      state.connection !== "reconnecting");
-  const scopedState = resetIdentity ? clearSensorIdentity(state) : state;
+  const scopedState =
+    generationOrder > 0
+      ? clearSensorIdentity(state)
+      : event.payload.state === "reconnecting" &&
+          state.connection !== "reconnecting"
+        ? clearTransientMeasurement(state)
+        : state;
   const next: AppState = {
     ...scopedState,
     connection: event.payload.state,
@@ -435,6 +452,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           sampleMonotonicNs: action.payload.sampleMonotonicNs,
           raw: action.payload.raw,
           calibrated: [...action.payload.force, ...action.payload.torque],
+          forceUnit: action.payload.forceUnit,
+          torqueUnit: action.payload.torqueUnit,
+          configurationRevision: action.payload.configurationRevision,
         },
       };
     case "plot_batch":

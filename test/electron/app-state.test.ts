@@ -31,7 +31,7 @@ const streamingState = (): AppState => ({
 });
 
 const connectionEvent = (
-  state: "disconnected" | "streaming",
+  state: "disconnected" | "streaming" | "reconnecting",
   generation: string,
   paused = false,
   monotonicNs = "100",
@@ -321,6 +321,48 @@ describe("renderer state", () => {
     expect(sensorB.health.productName).toBe("Sensor B");
   });
 
+  it("preserves sensor identity across a same-generation reconnect", () => {
+    const configured = appReducer(streamingState(), {
+      protocol,
+      type: "configuration_changed",
+      monotonicNs: "1000",
+      payload: {
+        productName: "Stable identity",
+        countsPerForceUnit: 10,
+        countsPerTorqueUnit: 20,
+        forceUnit: "N",
+        torqueUnit: "N-mm",
+        source: "sensor",
+        revision: "10",
+      },
+    });
+    const withSequence = appReducer(configured, {
+      protocol,
+      type: "error",
+      monotonicNs: "1001",
+      payload: {
+        operation: "sensor",
+        message: "transient",
+        sequence: "8",
+        droppedBefore: "0",
+      },
+    });
+    const reconnecting = appReducer(
+      withSequence,
+      connectionEvent("reconnecting", "1", false, "1002"),
+    );
+    const recovered = appReducer(
+      reconnecting,
+      connectionEvent("streaming", "1", false, "1003"),
+    );
+
+    expect(recovered.configuration.productName).toBe("Stable identity");
+    expect(recovered.configuration.revision).toBe("10");
+    expect(recovered.configuration.forceUnit).toBe("N");
+    expect(recovered.health.productName).toBe("Stable identity");
+    expect(recovered.lastErrorSequence).toBe("8");
+  });
+
   it("accepts a lower error sequence after a backend restart", () => {
     const faulted = appReducer(streamingState(), {
       protocol,
@@ -381,6 +423,34 @@ describe("renderer state", () => {
     expect(wrench.configuration.revision).toBe("2");
     expect(wrench.configuration.forceUnit).toBe("N");
     expect(wrench.configuration.torqueUnit).toBe("N-mm");
+  });
+
+  it("keeps a paused sample in its native units across configuration changes", () => {
+    const sampled = appReducer(streamingState(), wrenchEvent(20, "1000"));
+    const paused = appReducer(
+      sampled,
+      connectionEvent("streaming", "1", true, "1001"),
+    );
+    const reconfigured = appReducer(paused, {
+      protocol,
+      type: "configuration_changed",
+      monotonicNs: "1002",
+      payload: {
+        productName: "Updated",
+        countsPerForceUnit: 100,
+        countsPerTorqueUnit: 200,
+        forceUnit: "lbf",
+        torqueUnit: "lbf-in",
+        source: "sensor",
+        revision: "4",
+      },
+    });
+
+    expect(reconfigured.wrench.forceUnit).toBe("N");
+    expect(reconfigured.wrench.torqueUnit).toBe("N-mm");
+    expect(reconfigured.wrench.configurationRevision).toBe("3");
+    expect(reconfigured.configuration.forceUnit).toBe("lbf");
+    expect(reconfigured.configuration.revision).toBe("4");
   });
 
   it("accepts validated preferences injected by the main-process boundary", () => {
