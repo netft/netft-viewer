@@ -6,12 +6,25 @@ import type { AppState } from "../model/app-state";
 
 type PendingAction = "pause" | "bias" | "record" | "stop";
 
+interface ActionScope {
+  backendEpoch: string;
+  connectionGeneration: string;
+}
+
 interface PendingEntry {
   commandComplete: boolean;
   expectedState?:
     | { kind: "paused"; value: boolean }
     | { kind: "recording_active" }
     | { kind: "recording_idle" };
+  scope: ActionScope;
+  token: number;
+}
+
+interface ActionFeedback {
+  action: PendingAction;
+  errorCode?: string;
+  result: "success" | "error";
 }
 
 export interface ActionsProps {
@@ -30,6 +43,20 @@ const isRecordingActive = (state: AppState): boolean =>
 const safeErrorCode = (result: CommandResult): string =>
   result.errorCode?.slice(0, 64).replace(/[^A-Za-z0-9_.:-]/g, "") ||
   "command_failed";
+
+const scopeFromState = (state: AppState): ActionScope => ({
+  backendEpoch: state.backend.lastMonotonicNs,
+  connectionGeneration: state.connectionGeneration,
+});
+
+const sameScope = (left: ActionScope, right: ActionScope): boolean =>
+  left.backendEpoch === right.backendEpoch &&
+  left.connectionGeneration === right.connectionGeneration;
+
+const scopeIsLive = (scope: ActionScope, state: AppState): boolean =>
+  sameScope(scope, scopeFromState(state)) &&
+  state.backend.state === "running" &&
+  state.connection === "streaming";
 
 const expectedStateReached = (
   expected: PendingEntry["expectedState"],
@@ -55,10 +82,12 @@ const ActionsView = ({
   state,
 }: ActionsProps) => {
   const pendingRef = useRef(new Map<PendingAction, PendingEntry>());
+  const tokenRef = useRef(0);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const previousScopeRef = useRef(scopeFromState(state));
   const [pendingRevision, setPendingRevision] = useState(0);
-  const [errorCode, setErrorCode] = useState("");
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const streaming =
     state.backend.state === "running" && state.connection === "streaming";
   const recordingActive = isRecordingActive(state);
@@ -68,8 +97,13 @@ const ActionsView = ({
   }, []);
 
   const removePending = useCallback(
-    (action: PendingAction): void => {
-      if (pendingRef.current.delete(action)) {
+    (action: PendingAction, token?: number): void => {
+      const entry = pendingRef.current.get(action);
+      if (
+        entry !== undefined &&
+        (token === undefined || entry.token === token) &&
+        pendingRef.current.delete(action)
+      ) {
         rerenderPending();
       }
     },
@@ -85,48 +119,86 @@ const ActionsView = ({
       if (pendingRef.current.has(action)) {
         return;
       }
-      setErrorCode("");
+      setFeedback(null);
+      const token = ++tokenRef.current;
+      const scope = scopeFromState(stateRef.current);
       pendingRef.current.set(action, {
         commandComplete: false,
         expectedState,
+        scope,
+        token,
       });
       rerenderPending();
       void command()
         .then((result) => {
           const entry = pendingRef.current.get(action);
-          if (entry === undefined) {
+          if (
+            entry === undefined ||
+            entry.token !== token ||
+            !sameScope(entry.scope, scope) ||
+            !scopeIsLive(scope, stateRef.current)
+          ) {
             return;
           }
           if (!result.success) {
-            removePending(action);
+            removePending(action, token);
             if (result.errorCode !== "cancelled") {
               const code = safeErrorCode(result);
-              setErrorCode(code);
+              setFeedback({ action, errorCode: code, result: "error" });
               onError?.(code);
             }
             return;
           }
           entry.commandComplete = true;
           if (expectedStateReached(entry.expectedState, stateRef.current)) {
-            removePending(action);
+            removePending(action, token);
+            if (action === "bias") {
+              setFeedback({ action, result: "success" });
+            }
           }
         })
         .catch(() => {
-          removePending(action);
-          setErrorCode("command_unavailable");
-          onError?.("command_unavailable");
+          const entry = pendingRef.current.get(action);
+          if (
+            entry?.token === token &&
+            sameScope(entry.scope, scope) &&
+            scopeIsLive(scope, stateRef.current)
+          ) {
+            removePending(action, token);
+            setFeedback({
+              action,
+              errorCode: "command_unavailable",
+              result: "error",
+            });
+            onError?.("command_unavailable");
+          }
         });
     },
     [onError, removePending, rerenderPending],
   );
 
   useEffect(() => {
+    const currentScope = scopeFromState(state);
+    const sessionEnded =
+      !sameScope(previousScopeRef.current, currentScope) ||
+      state.backend.state !== "running" ||
+      state.connection !== "streaming";
+    previousScopeRef.current = currentScope;
+    if (sessionEnded) {
+      if (pendingRef.current.size > 0) {
+        pendingRef.current.clear();
+        rerenderPending();
+      }
+      setFeedback(null);
+      return;
+    }
     for (const [action, entry] of pendingRef.current) {
       if (
+        sameScope(entry.scope, currentScope) &&
         entry.commandComplete &&
         expectedStateReached(entry.expectedState, state)
       ) {
-        removePending(action);
+        removePending(action, entry.token);
       }
     }
   }, [
@@ -134,6 +206,8 @@ const ActionsView = ({
     state.paused,
     state.recording.state,
     state.connection,
+    state.connectionGeneration,
+    state.backend.lastMonotonicNs,
     state.backend.state,
   ]);
 
@@ -211,13 +285,20 @@ const ActionsView = ({
           </button>
         )}
       </div>
-      {errorCode.length > 0 ? (
+      {feedback !== null ? (
         <output
-          className="action-error"
-          data-error-code={errorCode}
+          className={
+            feedback.result === "error" ? "action-error" : "action-success"
+          }
+          data-action={feedback.action}
+          data-error-code={feedback.errorCode}
+          data-result={feedback.result}
+          aria-live="polite"
           role="status"
         >
-          The action could not be completed. Check the status details.
+          {feedback.result === "success"
+            ? "Bias applied."
+            : "The action could not be completed. Check the status details."}
         </output>
       ) : null}
     </>

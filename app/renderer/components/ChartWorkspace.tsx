@@ -28,6 +28,7 @@ import {
   type ViewerTheme,
 } from "../model/app-state";
 import { ChartToolbar } from "./ChartToolbar";
+import { RecordingErrorPanel } from "./RecordingErrorPanel";
 import {
   defaultEChartRuntime,
   useEChart,
@@ -407,6 +408,7 @@ export const ChartWorkspace = ({
         themePreference={themePreference}
         view={view}
       />
+      <RecordingErrorPanel state={state} />
       <ChartErrorBoundary>
         {view.mode === "combined" ? (
           <div className="combined-chart-layout">

@@ -371,4 +371,42 @@ describe("ChartWorkspace", () => {
     expect(screen.getByTestId("chart-render-fallback")).toBeDefined();
     expect(screen.getByTestId("chart-toolbar")).toBeDefined();
   });
+
+  it("keeps live charts visible beside structured recording recovery data", () => {
+    const runtime = new TestRuntime();
+    const state = stateWithPlot();
+    render(
+      <ChartWorkspace
+        runtime={runtime}
+        state={{
+          ...state,
+          backend: {
+            ...state.backend,
+            logPath: "/var/log/netft-viewer/companion.log",
+          },
+          recording: {
+            ...state.recording,
+            state: "error",
+            lastError: "write /private/capture failed for 10.0.0.3",
+            partialPath: "/data/capture.csv.partial",
+          },
+          recoverablePartialPath: "/data/capture.csv.partial",
+        }}
+        theme="light"
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toBeDefined();
+    expect(screen.getByTestId("chart-workspace")).toBeDefined();
+    expect(screen.getByTestId("chart-surface-combined")).toBeDefined();
+    expect(
+      screen.getByTestId("recording-error-detail").textContent,
+    ).not.toContain("/private/capture");
+    expect(screen.getByTestId("recording-error-partial").textContent).toContain(
+      ".partial",
+    );
+    expect(screen.getByTestId("recording-error-log").textContent).toContain(
+      "companion.log",
+    );
+  });
 });

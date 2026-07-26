@@ -33,6 +33,18 @@ export interface AppProps {
   initialPreferences?: Preferences;
 }
 
+const mergePreferences = (
+  preferences: Preferences,
+  patch: PreferencesPatch,
+): Preferences => ({
+  ...preferences,
+  ...patch,
+  visibleAxes:
+    patch.visibleAxes === undefined
+      ? [...preferences.visibleAxes]
+      : [...patch.visibleAxes],
+});
+
 export const App = ({ initialPreferences }: AppProps) => {
   const [state, dispatch] = useReducer(
     appReducer,
@@ -80,40 +92,6 @@ export const App = ({ initialPreferences }: AppProps) => {
     };
   }, []);
 
-  useEffect(() => {
-    if (initialPreferences !== undefined) {
-      return;
-    }
-    let active = true;
-    void window.netft
-      .getPreferences()
-      .then((preferences) => {
-        if (active) {
-          dispatch({ type: "preferences_received", preferences });
-        }
-      })
-      .catch(() => {
-        if (active) {
-          dispatch({
-            type: "settings_error",
-            monotonicNs: "1",
-            payload: {
-              operation: "read",
-              errorCode: "settings_unavailable",
-            },
-          });
-        }
-      })
-      .finally(() => {
-        if (active) {
-          hydratedPreferencesRef.current = true;
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [initialPreferences]);
-
   const flushPreferences = useCallback((): void => {
     preferenceTimerRef.current = undefined;
     const patch = pendingPreferencesRef.current;
@@ -133,6 +111,63 @@ export const App = ({ initialPreferences }: AppProps) => {
     });
   }, []);
 
+  const schedulePreferenceFlush = useCallback((): void => {
+    if (preferenceTimerRef.current !== undefined) {
+      window.clearTimeout(preferenceTimerRef.current);
+    }
+    preferenceTimerRef.current = window.setTimeout(flushPreferences, 250);
+  }, [flushPreferences]);
+
+  useEffect(() => {
+    if (initialPreferences !== undefined) {
+      return;
+    }
+    let active = true;
+    void window.netft
+      .getPreferences()
+      .then((preferences) => {
+        if (!active) {
+          return;
+        }
+        const queuedPatch = pendingPreferencesRef.current;
+        const hasQueuedPatch = Object.keys(queuedPatch).length > 0;
+        const merged = mergePreferences(preferences, queuedPatch);
+        dispatch({ type: "preferences_received", preferences: merged });
+        hydratedPreferencesRef.current = true;
+        if (hasQueuedPatch) {
+          pendingPreferencesRef.current = merged;
+          schedulePreferenceFlush();
+        }
+      })
+      .catch(() => {
+        if (!active) {
+          return;
+        }
+        const queuedPatch = pendingPreferencesRef.current;
+        const hasQueuedPatch = Object.keys(queuedPatch).length > 0;
+        const merged = mergePreferences(
+          stateRef.current.preferences,
+          queuedPatch,
+        );
+        dispatch({
+          type: "settings_error",
+          monotonicNs: "1",
+          payload: {
+            operation: "read",
+            errorCode: "settings_unavailable",
+          },
+        });
+        hydratedPreferencesRef.current = true;
+        if (hasQueuedPatch) {
+          pendingPreferencesRef.current = merged;
+          schedulePreferenceFlush();
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialPreferences, schedulePreferenceFlush]);
+
   useEffect(
     () => () => {
       if (preferenceTimerRef.current !== undefined) {
@@ -146,19 +181,16 @@ export const App = ({ initialPreferences }: AppProps) => {
   const changePreferences = useCallback(
     (patch: PreferencesPatch): void => {
       dispatch({ type: "preferences_patched", patch });
-      if (!hydratedPreferencesRef.current) {
-        return;
-      }
       pendingPreferencesRef.current = {
         ...pendingPreferencesRef.current,
         ...patch,
       };
-      if (preferenceTimerRef.current !== undefined) {
-        window.clearTimeout(preferenceTimerRef.current);
+      if (!hydratedPreferencesRef.current) {
+        return;
       }
-      preferenceTimerRef.current = window.setTimeout(flushPreferences, 250);
+      schedulePreferenceFlush();
     },
-    [flushPreferences],
+    [schedulePreferenceFlush],
   );
 
   const changeHost = useCallback((sensorHost: string) => {

@@ -132,6 +132,20 @@ describe("Actions", () => {
     );
   });
 
+  it("publishes bounded accessible Bias success feedback", async () => {
+    const api = commands();
+    render(<Actions api={api} state={liveState()} />);
+
+    fireEvent.click(screen.getByTestId("bias-action"));
+
+    await vi.waitFor(() => {
+      const feedback = screen.getByRole("status");
+      expect(feedback.dataset.action).toBe("bias");
+      expect(feedback.dataset.result).toBe("success");
+    });
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
   it("surfaces command failure without changing authoritative state", async () => {
     const api = commands();
     vi.mocked(api.setPaused).mockResolvedValue({
@@ -150,6 +164,82 @@ describe("Actions", () => {
       "private raw backend message",
     );
     expect(screen.getByTestId("pause-action").textContent).toContain("Pause");
+  });
+
+  it("clears stale pending state at a connection-generation boundary", async () => {
+    const first = deferred<{ success: boolean }>();
+    const second = deferred<{ success: boolean }>();
+    const api = commands();
+    vi.mocked(api.requestBias)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const state = liveState();
+    const view = render(<Actions api={api} state={state} />);
+
+    fireEvent.click(screen.getByTestId("bias-action"));
+    view.rerender(
+      <Actions
+        api={api}
+        state={{
+          ...state,
+          connectionGeneration: "2",
+        }}
+      />,
+    );
+    expect(screen.getByTestId("bias-action").getAttribute("aria-busy")).toBe(
+      "false",
+    );
+
+    fireEvent.click(screen.getByTestId("bias-action"));
+    expect(api.requestBias).toHaveBeenCalledTimes(2);
+    first.resolve({ success: true });
+    await Promise.resolve();
+    expect(screen.getByTestId("bias-action").getAttribute("aria-busy")).toBe(
+      "true",
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+
+    second.resolve({ success: true });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("status").dataset.result).toBe("success"),
+    );
+  });
+
+  it("releases a successful command waiting for an event when the session ends", async () => {
+    const pending = deferred<{ success: boolean }>();
+    const api = commands();
+    vi.mocked(api.setPaused).mockReturnValue(pending.promise);
+    const state = liveState();
+    const view = render(<Actions api={api} state={state} />);
+
+    fireEvent.click(screen.getByTestId("pause-action"));
+    pending.resolve({ success: true });
+    await Promise.resolve();
+    view.rerender(
+      <Actions
+        api={api}
+        state={{
+          ...state,
+          connection: "disconnected",
+        }}
+      />,
+    );
+    view.rerender(
+      <Actions
+        api={api}
+        state={{
+          ...state,
+          connectionGeneration: "2",
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("pause-action").getAttribute("aria-busy")).toBe(
+      "false",
+    );
+    expect(
+      (screen.getByTestId("pause-action") as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
 
@@ -281,6 +371,60 @@ describe("preference hydration", () => {
         ).toBe("settings_unavailable"),
       { timeout: 1_000 },
     );
+    expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
+      "dark",
+    );
+  });
+
+  it("merges delayed hydration under multiple user edits and persists once", async () => {
+    const pending =
+      deferred<ReturnType<typeof createInitialAppState>["preferences"]>();
+    const api = commands();
+    vi.mocked(api.getPreferences).mockReturnValue(pending.promise);
+    vi.mocked(api.updatePreferences).mockImplementation(async (patch) => ({
+      ...createInitialAppState().preferences,
+      ...patch,
+    }));
+    Object.defineProperty(window, "netft", {
+      configurable: true,
+      value: api,
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("axis-visibility-Fy"));
+    fireEvent.click(screen.getByTestId("axis-visibility-Fz"));
+    fireEvent.click(screen.getByTestId("chart-mode-panels"));
+    fireEvent.change(screen.getByTestId("theme-preference"), {
+      target: { value: "dark" },
+    });
+    expect(api.updatePreferences).not.toHaveBeenCalled();
+
+    pending.resolve({
+      sensorHost: "sensor.loaded.example",
+      plotMode: "combined",
+      timeWindowSeconds: 30,
+      visibleAxes: ["Fx", "Fy", "Fz"],
+      theme: "light",
+    });
+
+    await vi.waitFor(
+      () => expect(api.updatePreferences).toHaveBeenCalledOnce(),
+      { timeout: 1_000 },
+    );
+    expect(api.updatePreferences).toHaveBeenCalledWith({
+      sensorHost: "sensor.loaded.example",
+      plotMode: "panels",
+      timeWindowSeconds: 30,
+      visibleAxes: ["Fx", "Tx", "Ty", "Tz"],
+      theme: "dark",
+    });
+    expect(
+      (screen.getByTestId("sensor-host-input") as HTMLInputElement).value,
+    ).toBe("sensor.loaded.example");
+    expect(screen.getByTestId("chart-mode-panels").ariaPressed).toBe("true");
+    expect(screen.getByTestId("chart-window-30").ariaPressed).toBe("true");
+    expect(screen.getByTestId("axis-visibility-Fy").ariaPressed).toBe("false");
+    expect(screen.getByTestId("axis-visibility-Fz").ariaPressed).toBe("false");
     expect(screen.getByTestId("viewer-shell").dataset.themePreference).toBe(
       "dark",
     );
