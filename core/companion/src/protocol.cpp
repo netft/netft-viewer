@@ -553,6 +553,32 @@ Command parse_command(std::string_view line) {
   throw ProtocolError("unknown command type");
 }
 
+std::optional<RequestContext>
+recover_request_context(std::string_view line) noexcept {
+  try {
+    const auto root = parse_unique_json(line);
+    if (!root.is_object()) {
+      return std::nullopt;
+    }
+    auto request_id =
+        required_string(root, "requestId", maximum_request_id_bytes);
+    if (!valid_request_id(request_id)) {
+      return std::nullopt;
+    }
+    std::optional<std::string> command_type;
+    const auto type = root.find("type");
+    if (type != root.end() && type->is_string()) {
+      const auto value = type->get<std::string>();
+      if (value.size() <= 32U && valid_non_hello_command(value)) {
+        command_type = value;
+      }
+    }
+    return RequestContext{std::move(request_id), std::move(command_type)};
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
 std::optional<SerializedEvent> serialize_event(const CompanionEvent &event) {
   try {
     const auto serialized = std::visit(
@@ -587,6 +613,22 @@ std::optional<SerializedEvent> serialize_event(const CompanionEvent &event) {
             auto result = envelope("command_result", message.monotonic_ns,
                                    std::move(payload));
             result["requestId"] = message.request_id;
+            return result;
+          } else if constexpr (std::is_same_v<Message, RequestErrorEvent>) {
+            if ((message.request_id &&
+                 !valid_request_id(*message.request_id)) ||
+                message.error_code.empty() || message.error_message.empty()) {
+              return std::nullopt;
+            }
+            auto result = envelope("error", message.monotonic_ns,
+                                   {{"operation", "protocol"},
+                                    {"message", message.error_message},
+                                    {"errorCode", message.error_code},
+                                    {"sequence", decimal(message.sequence)},
+                                    {"droppedBefore", "0"}});
+            if (message.request_id) {
+              result["requestId"] = *message.request_id;
+            }
             return result;
           } else if constexpr (std::is_same_v<Message, SessionEventMessage>) {
             return session_envelope(message);

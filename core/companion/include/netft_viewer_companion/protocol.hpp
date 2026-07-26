@@ -16,6 +16,11 @@ inline constexpr std::size_t maximum_line_bytes = 1024U * 1024U;
 inline constexpr std::size_t maximum_json_nesting_depth = 64U;
 inline constexpr std::size_t maximum_request_id_bytes = 128U;
 
+struct RequestContext {
+  std::string request_id;
+  std::optional<std::string> command_type;
+};
+
 class ProtocolError : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -48,6 +53,8 @@ private:
 };
 
 [[nodiscard]] Command parse_command(std::string_view line);
+[[nodiscard]] std::optional<RequestContext>
+recover_request_context(std::string_view line) noexcept;
 [[nodiscard]] std::optional<SerializedEvent>
 serialize_event(const CompanionEvent &event);
 

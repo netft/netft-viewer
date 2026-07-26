@@ -285,6 +285,7 @@ const ErrorEventSchema = eventEnvelope(
   "error",
   z.object({
     operation: z.enum([
+      "protocol",
       "connect",
       "disconnect",
       "pause",
@@ -296,6 +297,7 @@ const ErrorEventSchema = eventEnvelope(
       "recording",
     ]),
     message: z.string(),
+    errorCode: z.string().min(1).optional(),
     sequence: CounterSchema,
     droppedBefore: CounterSchema,
   }),

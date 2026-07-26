@@ -8,3 +8,4 @@
 {"protocol":{"major":1,"minor":0},"type":"recording_progress","monotonicNs":"7","payload":{"acceptedSamples":"10","writtenSamples":"9","bytesWritten":"1024","queueSize":"1","queueCapacity":"65536"}}
 {"protocol":{"major":1,"minor":0},"type":"configuration_changed","monotonicNs":"8","payload":{"productName":"ATI Net F/T","countsPerForceUnit":1000000.0,"countsPerTorqueUnit":1000000.0,"forceUnit":"N","torqueUnit":"N-mm","source":"sensor","revision":"1"}}
 {"protocol":{"major":1,"minor":0},"type":"error","monotonicNs":"9","payload":{"operation":"sensor","message":"transport failure","sequence":"1","droppedBefore":"0"}}
+{"protocol":{"major":1,"minor":0},"type":"error","requestId":"req-malformed","monotonicNs":"10","payload":{"operation":"protocol","message":"Command does not satisfy protocol requirements","errorCode":"invalid_command","sequence":"0","droppedBefore":"0"}}

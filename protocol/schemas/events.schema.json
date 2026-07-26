@@ -480,6 +480,7 @@
               "properties": {
                 "operation": {
                   "enum": [
+                    "protocol",
                     "connect",
                     "disconnect",
                     "pause",
@@ -492,6 +493,7 @@
                   ]
                 },
                 "message": { "type": "string" },
+                "errorCode": { "type": "string", "minLength": 1 },
                 "sequence": { "$ref": "#/$defs/counter" },
                 "droppedBefore": { "$ref": "#/$defs/counter" }
               }

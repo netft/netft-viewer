@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -65,6 +66,14 @@ struct CommandResultEvent {
   std::string error_message;
 };
 
+struct RequestErrorEvent {
+  std::optional<std::string> request_id;
+  std::int64_t monotonic_ns{};
+  std::string error_code;
+  std::string error_message;
+  std::uint64_t sequence{};
+};
+
 struct SessionEventMessage {
   std::int64_t monotonic_ns{};
   SessionEvent event;
@@ -76,7 +85,7 @@ struct RecordingProgressEvent {
 };
 
 using CompanionEvent =
-    std::variant<HelloEvent, CommandResultEvent, SessionEventMessage,
-                 RecordingProgressEvent>;
+    std::variant<HelloEvent, CommandResultEvent, RequestErrorEvent,
+                 SessionEventMessage, RecordingProgressEvent>;
 
 } // namespace netft_viewer::companion
