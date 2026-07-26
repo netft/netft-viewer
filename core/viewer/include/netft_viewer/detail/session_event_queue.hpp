@@ -81,6 +81,8 @@ public:
     }
   }
 
+  void clear() noexcept { events_.clear(); }
+
   [[nodiscard]] bool empty() const noexcept { return events_.empty(); }
   [[nodiscard]] std::size_t size() const noexcept { return events_.size(); }
 

@@ -49,6 +49,12 @@ public:
     sink_.retain_generation(generation);
   }
 
+  [[nodiscard]] bool begin_measurements() noexcept {
+    return sink_.begin_measurements();
+  }
+
+  void revoke_measurements() noexcept { sink_.revoke_measurements(); }
+
 private:
   SessionEventSink &sink_;
   const std::atomic<std::uint64_t> &active_generation_;
@@ -72,21 +78,68 @@ ConnectionState connection_state_for(netft::ClientState state) {
 
 } // namespace
 
+struct MeasurementLease::State {
+  State(bool active, std::uint64_t value) : valid(active), epoch(value) {}
+
+  std::atomic<bool> valid;
+  std::uint64_t epoch{};
+};
+
+MeasurementLease::MeasurementLease(std::shared_ptr<State> state)
+    : state_(std::move(state)) {}
+
+bool MeasurementLease::valid() const noexcept {
+  return state_ && state_->valid.load(std::memory_order_acquire);
+}
+
+std::uint64_t MeasurementLease::epoch() const noexcept {
+  return state_ ? state_->epoch : 0U;
+}
+
+bool SessionEvent::valid_for_delivery() const noexcept {
+  const auto measurement = std::holds_alternative<TimedSample>(payload) ||
+                           std::holds_alternative<PlotBatch>(payload);
+  return !measurement || (measurement_lease && measurement_lease->valid());
+}
+
+std::uint64_t SessionEvent::measurement_epoch() const noexcept {
+  return measurement_lease ? measurement_lease->epoch() : 0U;
+}
+
 class SessionEventSink::Impl {
 public:
+  Impl()
+      : measurement_state(
+            std::make_shared<MeasurementLease::State>(false, 0U)) {}
+
   std::mutex mutex;
   std::condition_variable condition;
   detail::SessionEventQueue events;
+  std::shared_ptr<MeasurementLease::State> measurement_state;
+  std::uint64_t next_measurement_epoch{};
+  bool closed{};
 };
 
 SessionEventSink::SessionEventSink() : impl_(std::make_unique<Impl>()) {}
 
-SessionEventSink::~SessionEventSink() = default;
+SessionEventSink::~SessionEventSink() { close(); }
 
 void SessionEventSink::enqueue(SessionEvent event) noexcept {
   try {
     {
       std::lock_guard<std::mutex> lock(impl_->mutex);
+      if (impl_->closed) {
+        return;
+      }
+      const auto measurement =
+          std::holds_alternative<TimedSample>(event.payload) ||
+          std::holds_alternative<PlotBatch>(event.payload);
+      if (measurement) {
+        if (!impl_->measurement_state->valid.load(std::memory_order_acquire)) {
+          return;
+        }
+        event.measurement_lease = MeasurementLease{impl_->measurement_state};
+      }
       impl_->events.push(std::move(event));
     }
     impl_->condition.notify_one();
@@ -95,17 +148,42 @@ void SessionEventSink::enqueue(SessionEvent event) noexcept {
   }
 }
 
-std::optional<SessionEvent> SessionEventSink::try_pop() {
+SessionEventRead SessionEventSink::try_pop() {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  return impl_->events.pop();
+  if (impl_->closed) {
+    return {SessionEventReadStatus::Closed, std::nullopt};
+  }
+  auto event = impl_->events.pop();
+  return event
+             ? SessionEventRead{SessionEventReadStatus::Event, std::move(event)}
+             : SessionEventRead{SessionEventReadStatus::Empty, std::nullopt};
 }
 
-std::optional<SessionEvent>
+SessionEventRead
 SessionEventSink::wait_for_event(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(impl_->mutex);
-  impl_->condition.wait_for(lock, timeout,
-                            [&] { return !impl_->events.empty(); });
-  return impl_->events.pop();
+  impl_->condition.wait_for(
+      lock, timeout, [&] { return impl_->closed || !impl_->events.empty(); });
+  if (impl_->closed) {
+    return {SessionEventReadStatus::Closed, std::nullopt};
+  }
+  auto event = impl_->events.pop();
+  return event
+             ? SessionEventRead{SessionEventReadStatus::Event, std::move(event)}
+             : SessionEventRead{SessionEventReadStatus::Empty, std::nullopt};
+}
+
+void SessionEventSink::close() noexcept {
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (impl_->closed) {
+      return;
+    }
+    impl_->closed = true;
+    impl_->measurement_state->valid.store(false, std::memory_order_release);
+    impl_->events.clear();
+  }
+  impl_->condition.notify_all();
 }
 
 void SessionEventSink::purge_measurements(std::uint64_t generation) noexcept {
@@ -115,7 +193,30 @@ void SessionEventSink::purge_measurements(std::uint64_t generation) noexcept {
 
 void SessionEventSink::retain_generation(std::uint64_t generation) noexcept {
   std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (impl_->closed) {
+    return;
+  }
   impl_->events.retain_generation(generation);
+}
+
+bool SessionEventSink::begin_measurements() noexcept {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (impl_->closed) {
+    return false;
+  }
+  impl_->measurement_state->valid.store(false, std::memory_order_release);
+  try {
+    impl_->measurement_state = std::make_shared<MeasurementLease::State>(
+        true, ++impl_->next_measurement_epoch);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+void SessionEventSink::revoke_measurements() noexcept {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->measurement_state->valid.store(false, std::memory_order_release);
 }
 
 class ViewerSession::Impl {
@@ -155,6 +256,11 @@ public:
       recording_failure_reported_ = false;
     }
     events_.activate_generation(generation);
+    if (!events_.begin_measurements()) {
+      fail_connection(generation, SessionOperation::Connect,
+                      "measurement event channel is unavailable");
+      return SessionResult::Failed;
+    }
     events_.push(generation, connection_copy());
 
     try {
@@ -201,6 +307,8 @@ public:
       connection_.paused = false;
       callback_condition_.wait(lock, [&] { return active_callbacks_ == 0U; });
     }
+    events_.revoke_measurements();
+    events_.purge_measurements(generation);
     events_.push(generation, connection_copy());
 
     {
@@ -226,7 +334,6 @@ public:
     }
 
     plot_.reset();
-    events_.purge_measurements(generation);
     client_.reset();
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -261,17 +368,23 @@ public:
 
     bool recording_failed = false;
     if (paused) {
+      events_.revoke_measurements();
+      events_.purge_measurements(generation);
       if (recorder_->snapshot().state == RecordingState::Recording &&
           recorder_->pause() != RecorderResult::Ok) {
         recording_failed = true;
       }
       plot_.reset();
-      events_.purge_measurements(generation);
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         connection_.paused = true;
       }
     } else {
+      if (!events_.begin_measurements()) {
+        publish_error(generation, SessionOperation::Resume,
+                      "measurement event channel is unavailable");
+        return SessionResult::Failed;
+      }
       if (recorder_->snapshot().state == RecordingState::Paused &&
           recorder_->resume() != RecorderResult::Ok) {
         recording_failed = true;

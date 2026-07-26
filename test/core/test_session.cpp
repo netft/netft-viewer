@@ -57,6 +57,7 @@ public:
 
   ~CapturingSink() {
     stopping_.store(true, std::memory_order_release);
+    channel_.close();
     if (worker_.joinable()) {
       worker_.join();
     }
@@ -86,10 +87,14 @@ public:
 private:
   void consume() {
     while (!stopping_.load(std::memory_order_acquire)) {
-      auto event = channel_.wait_for_event(10ms);
-      if (!event) {
+      auto read = channel_.wait_for_event(10ms);
+      if (read.status == SessionEventReadStatus::Closed) {
+        return;
+      }
+      if (read.status != SessionEventReadStatus::Event) {
         continue;
       }
+      auto event = std::move(*read.event);
       publish([&] {
         std::visit(
             [&](auto &&payload) {
@@ -114,7 +119,7 @@ private:
                 errors.push_back(std::move(payload));
               }
             },
-            std::move(event->payload));
+            std::move(event.payload));
       });
     }
   }
@@ -434,8 +439,13 @@ TEST(SessionEventSinkTest, ConcreteHandoffRetainsABoundedErrorTail) {
   }
 
   std::vector<SessionError> retained;
-  while (auto event = sink.try_pop()) {
-    retained.push_back(std::get<SessionError>(std::move(event->payload)));
+  for (;;) {
+    auto read = sink.try_pop();
+    if (read.status == SessionEventReadStatus::Empty) {
+      break;
+    }
+    ASSERT_EQ(read.status, SessionEventReadStatus::Event);
+    retained.push_back(std::get<SessionError>(std::move(read.event->payload)));
   }
   ASSERT_EQ(retained.size(), detail::SessionEventQueue::error_capacity);
   EXPECT_EQ(retained.front().sequence,
@@ -443,6 +453,83 @@ TEST(SessionEventSinkTest, ConcreteHandoffRetainsABoundedErrorTail) {
   EXPECT_EQ(retained.back().sequence, 100U);
   EXPECT_EQ(retained.back().dropped_before,
             100U - detail::SessionEventQueue::error_capacity);
+}
+
+TEST(SessionEventSinkTest, CloseDropsPendingEventsAndRejectsFutureEnqueue) {
+  SessionEventSink sink;
+  SessionError before_close;
+  before_close.sequence = 1U;
+  sink.enqueue(SessionEvent{1U, std::move(before_close)});
+
+  sink.close();
+  sink.close();
+  EXPECT_EQ(sink.try_pop().status, SessionEventReadStatus::Closed);
+
+  SessionError after_close;
+  after_close.sequence = 2U;
+  sink.enqueue(SessionEvent{1U, std::move(after_close)});
+  EXPECT_EQ(sink.try_pop().status, SessionEventReadStatus::Closed);
+}
+
+TEST(SessionEventSinkTest, CloseImmediatelyWakesALongWaiter) {
+  SessionEventSink sink;
+  std::promise<void> started;
+  auto entered = started.get_future();
+  auto waiter = std::async(std::launch::async, [&] {
+    started.set_value();
+    return sink.wait_for_event(std::chrono::hours{24});
+  });
+  entered.wait();
+  EXPECT_EQ(waiter.wait_for(50ms), std::future_status::timeout);
+
+  sink.close();
+
+  ASSERT_EQ(waiter.wait_for(1s), std::future_status::ready);
+  EXPECT_EQ(waiter.get().status, SessionEventReadStatus::Closed);
+}
+
+TEST(ViewerSessionTest, RevokedPoppedMeasurementNeverBecomesValidAgain) {
+  netft::test::FakeSensor sensor;
+  SessionEventSink events;
+  ViewerSession session(events, options());
+  sensor.pause();
+  ASSERT_EQ(session.connect(config_for(sensor)), SessionResult::Ok);
+  ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime));
+  sensor.send_record_now(1U, 0U, 100U);
+
+  std::optional<SessionEvent> old_measurement;
+  const auto old_deadline = std::chrono::steady_clock::now() + 1s;
+  while (!old_measurement && std::chrono::steady_clock::now() < old_deadline) {
+    auto read = events.wait_for_event(20ms);
+    ASSERT_NE(read.status, SessionEventReadStatus::Closed);
+    if (read.status == SessionEventReadStatus::Event &&
+        std::holds_alternative<TimedSample>(read.event->payload)) {
+      old_measurement = std::move(read.event);
+    }
+  }
+  ASSERT_TRUE(old_measurement);
+  ASSERT_TRUE(old_measurement->valid_for_delivery());
+  const auto old_epoch = old_measurement->measurement_epoch();
+
+  ASSERT_EQ(session.set_paused(true), SessionResult::Ok);
+  EXPECT_FALSE(old_measurement->valid_for_delivery());
+  ASSERT_EQ(session.set_paused(false), SessionResult::Ok);
+  EXPECT_FALSE(old_measurement->valid_for_delivery());
+
+  sensor.send_record_now(2U, 0U, 104U);
+  std::optional<SessionEvent> new_measurement;
+  const auto new_deadline = std::chrono::steady_clock::now() + 1s;
+  while (!new_measurement && std::chrono::steady_clock::now() < new_deadline) {
+    auto read = events.wait_for_event(20ms);
+    ASSERT_NE(read.status, SessionEventReadStatus::Closed);
+    if (read.status == SessionEventReadStatus::Event &&
+        std::holds_alternative<TimedSample>(read.event->payload)) {
+      new_measurement = std::move(read.event);
+    }
+  }
+  ASSERT_TRUE(new_measurement);
+  EXPECT_TRUE(new_measurement->valid_for_delivery());
+  EXPECT_NE(new_measurement->measurement_epoch(), old_epoch);
 }
 
 TEST(ViewerSessionTest, SnapshotWaitsForPauseToPublishACompositeState) {
