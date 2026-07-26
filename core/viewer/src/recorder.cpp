@@ -1,5 +1,7 @@
 #include "netft_viewer/recorder.hpp"
 
+#include "netft_viewer/detail/drain_completion.hpp"
+
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -735,7 +737,7 @@ void Recorder::finish_error_file() noexcept {
 }
 
 bool Recorder::drain_complete() const noexcept {
-  return queue_.size() == 0U && submission_gate_.drained();
+  return detail::drain_complete(submission_gate_, queue_);
 }
 
 } // namespace netft_viewer

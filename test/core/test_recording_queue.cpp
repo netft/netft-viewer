@@ -4,6 +4,7 @@
 #include <thread>
 #include <vector>
 
+#include "netft_viewer/detail/drain_completion.hpp"
 #include "netft_viewer/detail/submission_gate.hpp"
 #include "netft_viewer/recording_queue.hpp"
 
@@ -123,6 +124,35 @@ TEST(SubmissionGateTest,
   EXPECT_FALSE(interleaved_entry.accepted());
   EXPECT_TRUE(gate.drained());
   EXPECT_TRUE(gate.enter().accepted());
+}
+
+TEST(DrainCompletionTest,
+     AcceptedPreCloseEntryMustPublishBeforeQueueCanBeObservedEmpty) {
+  detail::SubmissionGate gate;
+  RecordingQueue<int, 4> queue;
+  ASSERT_TRUE(gate.try_open());
+  auto accepted_entry = gate.enter();
+  ASSERT_TRUE(accepted_entry.accepted());
+  gate.close();
+  bool interleaving_hook_ran = false;
+
+  const auto complete = detail::drain_complete(gate, queue, [&] {
+    interleaving_hook_ran = true;
+    ASSERT_TRUE(queue.try_push(42));
+    accepted_entry.release();
+  });
+
+  EXPECT_FALSE(complete);
+  EXPECT_FALSE(interleaving_hook_ran);
+  if (!interleaving_hook_ran) {
+    ASSERT_TRUE(queue.try_push(42));
+    accepted_entry.release();
+  }
+  EXPECT_FALSE(detail::drain_complete(gate, queue));
+  int recorded_value{};
+  ASSERT_TRUE(queue.try_pop(recorded_value));
+  EXPECT_EQ(recorded_value, 42);
+  EXPECT_TRUE(detail::drain_complete(gate, queue));
 }
 
 } // namespace
