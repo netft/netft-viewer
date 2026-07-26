@@ -1,0 +1,15 @@
+{
+  "name": "netft-viewer",
+  "productName": "Net F/T Viewer",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "check:versions": "node tools/check-versions.mjs",
+    "test:project": "node --test test/project/version.test.mjs"
+  },
+  "devDependencies": {
+    "pnpm": "11.17.0"
+  }
+}

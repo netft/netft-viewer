@@ -1,0 +1,23 @@
+[workspace]
+authors = ["Net F/T Viewer contributors"]
+channels = ["conda-forge"]
+name = "netft-viewer"
+platforms = ["linux-64", "linux-aarch64", "win-64", "osx-64", "osx-arm64"]
+version = "0.1.0"
+
+[dependencies]
+nodejs = "24.*"
+pnpm = "==11.17.0"
+cmake = ">=3.21"
+ninja = "*"
+clang = "*"
+clangxx = "*"
+clang-tools = "*"
+pkg-config = "*"
+
+[tasks]
+native-configure = "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug"
+native-build = "cmake --build build/native"
+native-test = "ctest --test-dir build/native --output-on-failure"
+format-check = "pnpm exec prettier --check app protocol test tools && clang-format --dry-run --Werror $(find core test -type f \\( -name '*.cpp' -o -name '*.hpp' \\))"
+tidy = "run-clang-tidy -p build/native"

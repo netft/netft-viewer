@@ -1,2 +1,17 @@
 # Git worktrees
 .worktrees/
+
+# JavaScript dependencies and logs
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+
+# Native and Pixi build artifacts
+build/
+.pixi/
+
+# Test and tool output
+coverage/
+playwright-report/
+test-results/
+compile_commands.json
