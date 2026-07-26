@@ -31,10 +31,12 @@ set(HTTP_ONLY ON CACHE BOOL "" FORCE)
 set(CURL_BROTLI OFF CACHE STRING "" FORCE)
 set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
 set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
 FetchContent_Declare(curl
   URL https://curl.se/download/curl-8.21.0.tar.xz
   URL_HASH SHA256=aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(curl)
 
