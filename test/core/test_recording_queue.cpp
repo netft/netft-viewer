@@ -111,16 +111,18 @@ TEST(SubmissionGateTest, CannotReopenUntilEveryPreCloseEntryLeaves) {
   EXPECT_TRUE(gate.try_open());
 }
 
-TEST(SubmissionGateTest, EntryBeginsInFlightAccountingBeforeGateDecision) {
+TEST(SubmissionGateTest,
+     ReopenAtomicallyExcludesAnEntryFromTheClosedGeneration) {
   detail::SubmissionGate gate;
   gate.close();
+  detail::SubmissionGate::Entry interleaved_entry;
 
-  auto entry = gate.enter();
+  const auto opened = gate.try_open([&] { interleaved_entry = gate.enter(); });
 
-  EXPECT_FALSE(entry.accepted());
-  EXPECT_FALSE(gate.drained());
-  entry.release();
+  EXPECT_TRUE(opened);
+  EXPECT_FALSE(interleaved_entry.accepted());
   EXPECT_TRUE(gate.drained());
+  EXPECT_TRUE(gate.enter().accepted());
 }
 
 } // namespace

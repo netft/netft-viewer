@@ -7,6 +7,9 @@
 namespace netft_viewer::detail {
 
 class SubmissionGate {
+  static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
+                "SubmissionGate requires lock-free 64-bit atomics");
+
 public:
   class Entry {
   public:
@@ -16,13 +19,13 @@ public:
 
     Entry(Entry &&other) noexcept
         : gate_(std::exchange(other.gate_, nullptr)),
-          accepted_(other.accepted_) {}
+          accepted_(std::exchange(other.accepted_, false)) {}
 
     Entry &operator=(Entry &&other) noexcept {
       if (this != &other) {
         release();
         gate_ = std::exchange(other.gate_, nullptr);
-        accepted_ = other.accepted_;
+        accepted_ = std::exchange(other.accepted_, false);
       }
       return *this;
     }
@@ -33,7 +36,7 @@ public:
 
     void release() noexcept {
       if (gate_ != nullptr) {
-        gate_->in_flight_.fetch_sub(1, std::memory_order_release);
+        gate_->admission_.fetch_sub(1U, std::memory_order_release);
         gate_ = nullptr;
       }
     }
@@ -49,27 +52,49 @@ public:
   };
 
   Entry enter() noexcept {
-    in_flight_.fetch_add(1, std::memory_order_acq_rel);
-    return Entry{*this, open_.load(std::memory_order_acquire)};
+    auto current = admission_.load(std::memory_order_acquire);
+    while ((current & open_bit) != 0U) {
+      if ((current & count_mask) == count_mask) {
+        return Entry{};
+      }
+      if (admission_.compare_exchange_weak(current, current + 1U,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_acquire)) {
+        return Entry{*this, true};
+      }
+    }
+    return Entry{};
   }
 
-  void close() noexcept { open_.store(false, std::memory_order_release); }
+  void close() noexcept {
+    admission_.fetch_and(count_mask, std::memory_order_acq_rel);
+  }
+
+  template <typename BeforeCommit>
+  bool try_open(BeforeCommit &&before_commit) noexcept(
+      noexcept(std::forward<BeforeCommit>(before_commit)())) {
+    std::uint64_t expected = 0U;
+    // The hook makes the commit point deterministically testable without
+    // changing the single-CAS production protocol.
+    std::forward<BeforeCommit>(before_commit)();
+    return admission_.compare_exchange_strong(expected, open_bit,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire);
+  }
 
   bool try_open() noexcept {
-    if (!drained()) {
-      return false;
-    }
-    open_.store(true, std::memory_order_release);
-    return true;
+    return try_open([]() noexcept {});
   }
 
   bool drained() const noexcept {
-    return in_flight_.load(std::memory_order_acquire) == 0U;
+    return (admission_.load(std::memory_order_acquire) & count_mask) == 0U;
   }
 
 private:
-  std::atomic<bool> open_{false};
-  std::atomic<std::uint32_t> in_flight_{0};
+  static constexpr std::uint64_t open_bit = std::uint64_t{1} << 63U;
+  static constexpr std::uint64_t count_mask = open_bit - 1U;
+
+  std::atomic<std::uint64_t> admission_{0U};
 };
 
 } // namespace netft_viewer::detail
