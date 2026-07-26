@@ -1,14 +1,14 @@
 #include "netft_viewer/session.hpp"
 
+#include "netft_viewer/detail/session_event_queue.hpp"
+
 #include <atomic>
 #include <condition_variable>
-#include <deque>
 #include <exception>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <utility>
-#include <variant>
 
 namespace netft_viewer {
 namespace {
@@ -28,171 +28,30 @@ public:
   }
 };
 
-struct ConnectionEvent {
-  ConnectionSnapshot value;
-};
-struct HealthEvent {
-  netft::HealthSnapshot value;
-};
-struct LiveEvent {
-  TimedSample value;
-};
-struct PlotEvent {
-  PlotBatch value;
-};
-struct RecordingEvent {
-  RecorderSnapshot value;
-};
-struct ConfigurationEvent {
-  netft::SensorConfiguration value;
-};
-struct ErrorEvent {
-  SessionError value;
-};
-struct Fence {
-  std::mutex mutex;
-  std::condition_variable condition;
-  bool complete{};
-};
-struct FenceEvent {
-  std::shared_ptr<Fence> value;
-};
-
-using EventPayload =
-    std::variant<ConnectionEvent, HealthEvent, LiveEvent, PlotEvent,
-                 RecordingEvent, ConfigurationEvent, ErrorEvent, FenceEvent>;
-
-struct QueuedEvent {
-  std::uint64_t generation{};
-  EventPayload payload;
-};
-
-template <typename Type>
-constexpr bool coalesced_event = std::is_same<Type, HealthEvent>::value ||
-                                 std::is_same<Type, LiveEvent>::value ||
-                                 std::is_same<Type, PlotEvent>::value ||
-                                 std::is_same<Type, RecordingEvent>::value;
-
-class EventDispatcher {
+class EventPublisher {
 public:
-  EventDispatcher(SessionEventSink &sink,
-                  const std::atomic<std::uint64_t> &active_generation)
-      : sink_(sink), active_generation_(active_generation),
-        worker_(&EventDispatcher::run, this) {}
+  EventPublisher(SessionEventSink &sink,
+                 const std::atomic<std::uint64_t> &active_generation)
+      : sink_(sink), active_generation_(active_generation) {}
 
-  ~EventDispatcher() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      stopping_ = true;
+  template <typename Payload>
+  void push(std::uint64_t generation, Payload payload) noexcept {
+    if (generation == active_generation_.load(std::memory_order_acquire)) {
+      sink_.enqueue(SessionEvent{generation, std::move(payload)});
     }
-    condition_.notify_all();
-    if (worker_.joinable()) {
-      worker_.join();
-    }
-  }
-
-  template <typename Event> void push(std::uint64_t generation, Event event) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if constexpr (coalesced_event<Event>) {
-      for (auto iterator = events_.begin(); iterator != events_.end();
-           ++iterator) {
-        if (iterator->generation == generation &&
-            std::holds_alternative<Event>(iterator->payload)) {
-          iterator->payload = std::move(event);
-          condition_.notify_one();
-          return;
-        }
-      }
-    }
-    events_.push_back({generation, std::move(event)});
-    condition_.notify_one();
   }
 
   void purge_measurements(std::uint64_t generation) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto iterator = events_.begin();
-    while (iterator != events_.end()) {
-      const auto measurement =
-          std::holds_alternative<LiveEvent>(iterator->payload) ||
-          std::holds_alternative<PlotEvent>(iterator->payload);
-      if (iterator->generation == generation && measurement) {
-        iterator = events_.erase(iterator);
-      } else {
-        ++iterator;
-      }
-    }
+    sink_.purge_measurements(generation);
   }
 
-  void fence(std::uint64_t generation) {
-    if (std::this_thread::get_id() == worker_.get_id()) {
-      return;
-    }
-    auto fence = std::make_shared<Fence>();
-    push(generation, FenceEvent{fence});
-    std::unique_lock<std::mutex> lock(fence->mutex);
-    fence->condition.wait(lock, [&] { return fence->complete; });
+  void activate_generation(std::uint64_t generation) {
+    sink_.retain_generation(generation);
   }
 
 private:
-  void run() noexcept {
-    for (;;) {
-      QueuedEvent event;
-      {
-        std::unique_lock<std::mutex> lock(mutex_);
-        condition_.wait(lock, [&] { return stopping_ || !events_.empty(); });
-        if (events_.empty()) {
-          return;
-        }
-        event = std::move(events_.front());
-        events_.pop_front();
-      }
-      if (auto *fence = std::get_if<FenceEvent>(&event.payload)) {
-        {
-          std::lock_guard<std::mutex> lock(fence->value->mutex);
-          fence->value->complete = true;
-        }
-        fence->value->condition.notify_all();
-        continue;
-      }
-      if (event.generation !=
-          active_generation_.load(std::memory_order_acquire)) {
-        continue;
-      }
-      try {
-        std::visit(
-            [&](const auto &typed) {
-              using Type = std::decay_t<decltype(typed)>;
-              if constexpr (std::is_same<Type, ConnectionEvent>::value) {
-                sink_.connection_changed(typed.value);
-              } else if constexpr (std::is_same<Type, HealthEvent>::value) {
-                sink_.health_changed(typed.value);
-              } else if constexpr (std::is_same<Type, LiveEvent>::value) {
-                sink_.live_wrench(typed.value);
-              } else if constexpr (std::is_same<Type, PlotEvent>::value) {
-                sink_.plot_batch(typed.value);
-              } else if constexpr (std::is_same<Type, RecordingEvent>::value) {
-                sink_.recording_changed(typed.value);
-              } else if constexpr (std::is_same<Type,
-                                                ConfigurationEvent>::value) {
-                sink_.configuration_changed(typed.value);
-              } else if constexpr (std::is_same<Type, ErrorEvent>::value) {
-                sink_.error(typed.value);
-              }
-            },
-            event.payload);
-      } catch (...) {
-        // Event consumers are isolated from acquisition and recording.
-      }
-    }
-  }
-
   SessionEventSink &sink_;
   const std::atomic<std::uint64_t> &active_generation_;
-  std::mutex mutex_;
-  std::condition_variable condition_;
-  std::deque<QueuedEvent> events_;
-  bool stopping_{};
-  std::thread worker_;
 };
 
 ConnectionState connection_state_for(netft::ClientState state) {
@@ -213,6 +72,52 @@ ConnectionState connection_state_for(netft::ClientState state) {
 
 } // namespace
 
+class SessionEventSink::Impl {
+public:
+  std::mutex mutex;
+  std::condition_variable condition;
+  detail::SessionEventQueue events;
+};
+
+SessionEventSink::SessionEventSink() : impl_(std::make_unique<Impl>()) {}
+
+SessionEventSink::~SessionEventSink() = default;
+
+void SessionEventSink::enqueue(SessionEvent event) noexcept {
+  try {
+    {
+      std::lock_guard<std::mutex> lock(impl_->mutex);
+      impl_->events.push(std::move(event));
+    }
+    impl_->condition.notify_one();
+  } catch (...) {
+    // Allocation failure cannot be reported through the same exhausted queue.
+  }
+}
+
+std::optional<SessionEvent> SessionEventSink::try_pop() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->events.pop();
+}
+
+std::optional<SessionEvent>
+SessionEventSink::wait_for_event(std::chrono::milliseconds timeout) {
+  std::unique_lock<std::mutex> lock(impl_->mutex);
+  impl_->condition.wait_for(lock, timeout,
+                            [&] { return !impl_->events.empty(); });
+  return impl_->events.pop();
+}
+
+void SessionEventSink::purge_measurements(std::uint64_t generation) noexcept {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->events.purge_measurements(generation);
+}
+
+void SessionEventSink::retain_generation(std::uint64_t generation) noexcept {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->events.retain_generation(generation);
+}
+
 class ViewerSession::Impl {
 public:
   Impl(SessionEventSink &sink, SessionOptions options)
@@ -221,7 +126,7 @@ public:
                               : std::make_shared<SystemClock>()),
         recorder_(options_.recorder ? options_.recorder
                                     : std::make_shared<Recorder>()),
-        plot_(options_.plot_interval), dispatcher_(sink, active_generation_) {
+        plot_(options_.plot_interval), events_(sink, active_generation_) {
     if (options_.health_interval <= std::chrono::milliseconds::zero()) {
       throw std::invalid_argument("health interval must be positive");
     }
@@ -246,9 +151,11 @@ public:
       health_.sensor_host = config.sensor_host;
       health_.rdt_port = config.rdt_port;
       accepting_samples_ = true;
+      has_streamed_ = false;
       recording_failure_reported_ = false;
     }
-    dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+    events_.activate_generation(generation);
+    events_.push(generation, connection_copy());
 
     try {
       client_ = std::make_unique<netft::Client>(std::move(config));
@@ -294,7 +201,7 @@ public:
       connection_.paused = false;
       callback_condition_.wait(lock, [&] { return active_callbacks_ == 0U; });
     }
-    dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+    events_.push(generation, connection_copy());
 
     {
       std::lock_guard<std::mutex> lock(health_wait_mutex_);
@@ -319,8 +226,7 @@ public:
     }
 
     plot_.reset();
-    dispatcher_.purge_measurements(generation);
-    dispatcher_.fence(generation);
+    events_.purge_measurements(generation);
     client_.reset();
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -331,7 +237,7 @@ public:
       latest_.reset();
       configuration_.reset();
     }
-    dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+    events_.push(generation, connection_copy());
     return SessionResult::Ok;
   }
 
@@ -360,8 +266,7 @@ public:
         recording_failed = true;
       }
       plot_.reset();
-      dispatcher_.purge_measurements(generation);
-      dispatcher_.fence(generation);
+      events_.purge_measurements(generation);
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         connection_.paused = true;
@@ -379,7 +284,7 @@ public:
       }
     }
     publish_recording(generation);
-    dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+    events_.push(generation, connection_copy());
     if (recording_failed) {
       publish_error(generation, SessionOperation::Recording,
                     recorder_->snapshot().last_error);
@@ -452,6 +357,7 @@ public:
   }
 
   SessionSnapshot snapshot() const {
+    std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     SessionSnapshot snapshot;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -472,6 +378,7 @@ private:
         return;
       }
       ++active_callbacks_;
+      sample_revision_.fetch_add(1U, std::memory_order_release);
     }
 
     try {
@@ -484,6 +391,7 @@ private:
         std::lock_guard<std::mutex> lock(state_mutex_);
         if (generation == connection_.generation && accepting_samples_) {
           latest_ = timed;
+          has_streamed_ = true;
           if (connection_.state != ConnectionState::Streaming) {
             connection_.state = ConnectionState::Streaming;
             connection_.last_error.clear();
@@ -494,11 +402,11 @@ private:
 
       if (generation == active_generation_.load(std::memory_order_acquire)) {
         if (connection_changed) {
-          dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+          events_.push(generation, connection_copy());
         }
-        dispatcher_.push(generation, LiveEvent{std::move(timed)});
+        events_.push(generation, std::move(timed));
         if (plot_batch) {
-          dispatcher_.push(generation, PlotEvent{*plot_batch});
+          events_.push(generation, *plot_batch);
         }
         if ((submit_result == SubmitResult::Overflow ||
              submit_result == SubmitResult::Failed) &&
@@ -537,6 +445,8 @@ private:
 
   void publish_health(std::uint64_t generation,
                       netft::Client *client) noexcept {
+    const auto revision_before =
+        sample_revision_.load(std::memory_order_acquire);
     netft::HealthSnapshot health;
     try {
       health = client->health();
@@ -559,13 +469,19 @@ private:
         changed_configuration = configuration_;
       }
       auto mapped = connection_state_for(health.state);
+      const auto revision_now =
+          sample_revision_.load(std::memory_order_acquire);
       if (connection_.state == ConnectionState::Disconnecting) {
         mapped = ConnectionState::Disconnecting;
       } else if (connection_.state == ConnectionState::Streaming &&
-                 mapped == ConnectionState::Connecting) {
-        // A health poll may have copied Connecting immediately before the
-        // first sample callback established Streaming.
+                 mapped != ConnectionState::Streaming &&
+                 revision_now != revision_before) {
+        // The poll copied an older client state before a newer sample callback
+        // established Streaming.
         mapped = ConnectionState::Streaming;
+      } else if (has_streamed_ && (mapped == ConnectionState::Connecting ||
+                                   mapped == ConnectionState::Reconnecting)) {
+        mapped = ConnectionState::Reconnecting;
       }
       if (mapped == ConnectionState::Disconnected &&
           connection_.state != ConnectionState::Disconnecting) {
@@ -579,12 +495,12 @@ private:
       }
     }
     if (changed_connection) {
-      dispatcher_.push(generation, ConnectionEvent{*changed_connection});
+      events_.push(generation, *changed_connection);
     }
     if (changed_configuration) {
-      dispatcher_.push(generation, ConfigurationEvent{*changed_configuration});
+      events_.push(generation, *changed_configuration);
     }
-    dispatcher_.push(generation, HealthEvent{std::move(health)});
+    events_.push(generation, std::move(health));
     publish_recording(generation);
 
     if (recorder_->snapshot().state == RecordingState::Error &&
@@ -603,7 +519,7 @@ private:
       connection_.state = ConnectionState::Error;
       connection_.last_error = message;
     }
-    dispatcher_.push(generation, ConnectionEvent{connection_copy()});
+    events_.push(generation, connection_copy());
     publish_error(generation, operation, std::move(message));
   }
 
@@ -613,13 +529,17 @@ private:
   }
 
   void publish_recording(std::uint64_t generation) {
-    dispatcher_.push(generation, RecordingEvent{recorder_->snapshot()});
+    events_.push(generation, recorder_->snapshot());
   }
 
   void publish_error(std::uint64_t generation, SessionOperation operation,
                      std::string message) {
-    dispatcher_.push(generation,
-                     ErrorEvent{SessionError{operation, std::move(message)}});
+    SessionError error;
+    error.operation = operation;
+    error.message = std::move(message);
+    error.sequence =
+        error_sequence_.fetch_add(1U, std::memory_order_relaxed) + 1U;
+    events_.push(generation, std::move(error));
   }
 
   SessionOptions options_;
@@ -627,7 +547,7 @@ private:
   std::shared_ptr<Recorder> recorder_;
   PlotAggregator plot_;
   std::atomic<std::uint64_t> active_generation_{0};
-  EventDispatcher dispatcher_;
+  EventPublisher events_;
 
   mutable std::mutex operation_mutex_;
   mutable std::mutex state_mutex_;
@@ -637,8 +557,11 @@ private:
   std::optional<TimedSample> latest_;
   std::optional<netft::SensorConfiguration> configuration_;
   bool accepting_samples_{};
+  bool has_streamed_{};
   std::size_t active_callbacks_{};
+  std::atomic<std::uint64_t> sample_revision_{0};
   std::atomic<bool> recording_failure_reported_{false};
+  std::atomic<std::uint64_t> error_sequence_{0};
 
   std::unique_ptr<netft::Client> client_;
   std::mutex health_wait_mutex_;

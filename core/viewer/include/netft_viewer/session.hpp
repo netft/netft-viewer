@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <variant>
 
 #include "netft/client.hpp"
 #include "netft_viewer/clock.hpp"
@@ -47,6 +48,18 @@ struct ConnectionSnapshot {
 struct SessionError {
   SessionOperation operation{SessionOperation::Sensor};
   std::string message;
+  std::uint64_t sequence{};
+  std::uint64_t dropped_before{};
+};
+
+using SessionEventPayload =
+    std::variant<ConnectionSnapshot, netft::HealthSnapshot, TimedSample,
+                 PlotBatch, RecorderSnapshot, netft::SensorConfiguration,
+                 SessionError>;
+
+struct SessionEvent {
+  std::uint64_t generation{};
+  SessionEventPayload payload;
 };
 
 struct SessionSnapshot {
@@ -57,17 +70,29 @@ struct SessionSnapshot {
   std::optional<netft::SensorConfiguration> configuration;
 };
 
-class SessionEventSink {
+class SessionEventSink final {
 public:
-  virtual ~SessionEventSink() = default;
-  virtual void connection_changed(const ConnectionSnapshot &snapshot) = 0;
-  virtual void health_changed(const netft::HealthSnapshot &snapshot) = 0;
-  virtual void live_wrench(const TimedSample &sample) = 0;
-  virtual void plot_batch(const PlotBatch &batch) = 0;
-  virtual void recording_changed(const RecorderSnapshot &snapshot) = 0;
-  virtual void
-  configuration_changed(const netft::SensorConfiguration &configuration) = 0;
-  virtual void error(const SessionError &error) = 0;
+  SessionEventSink();
+  ~SessionEventSink();
+
+  SessionEventSink(const SessionEventSink &) = delete;
+  SessionEventSink &operator=(const SessionEventSink &) = delete;
+
+  // These methods only access a bounded in-memory queue. They never invoke
+  // consumers or perform I/O, so session control and destruction cannot be
+  // delayed by renderer or IPC work. The sink must outlive ViewerSession.
+  void enqueue(SessionEvent event) noexcept;
+  [[nodiscard]] std::optional<SessionEvent> try_pop();
+  [[nodiscard]] std::optional<SessionEvent>
+  wait_for_event(std::chrono::milliseconds timeout);
+
+  // ViewerSession lifecycle controls. Consumers do not need these methods.
+  void purge_measurements(std::uint64_t generation) noexcept;
+  void retain_generation(std::uint64_t generation) noexcept;
+
+private:
+  class Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 struct SessionOptions {
