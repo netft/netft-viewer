@@ -172,8 +172,8 @@ export const App = ({ initialPreferences }: AppProps) => {
     () => () => {
       if (preferenceTimerRef.current !== undefined) {
         window.clearTimeout(preferenceTimerRef.current);
-        flushPreferences();
       }
+      flushPreferences();
     },
     [flushPreferences],
   );

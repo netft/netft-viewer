@@ -429,4 +429,42 @@ describe("preference hydration", () => {
       "dark",
     );
   });
+
+  it("flushes pre-hydration edits on unmount without a late overwrite", async () => {
+    const pending =
+      deferred<ReturnType<typeof createInitialAppState>["preferences"]>();
+    const api = commands();
+    vi.mocked(api.getPreferences).mockReturnValue(pending.promise);
+    Object.defineProperty(window, "netft", {
+      configurable: true,
+      value: api,
+    });
+    const view = render(<App />);
+
+    fireEvent.click(screen.getByTestId("chart-mode-panels"));
+    fireEvent.change(screen.getByTestId("theme-preference"), {
+      target: { value: "dark" },
+    });
+    expect(api.updatePreferences).not.toHaveBeenCalled();
+
+    view.unmount();
+
+    expect(api.updatePreferences).toHaveBeenCalledOnce();
+    expect(api.updatePreferences).toHaveBeenCalledWith({
+      plotMode: "panels",
+      theme: "dark",
+    });
+
+    pending.resolve({
+      sensorHost: "sensor.loaded.example",
+      plotMode: "combined",
+      timeWindowSeconds: 30,
+      visibleAxes: ["Fx", "Fy", "Fz"],
+      theme: "light",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.updatePreferences).toHaveBeenCalledOnce();
+  });
 });
