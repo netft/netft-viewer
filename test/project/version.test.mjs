@@ -8,3 +8,10 @@ test("package and CMake versions match", () => {
   const match = cmake.match(/project\(netft_viewer VERSION ([0-9]+\.[0-9]+\.[0-9]+)/);
   assert.equal(match?.[1], pkg.version);
 });
+
+test("CMake requires portable C++17", () => {
+  const cmake = readFileSync("CMakeLists.txt", "utf8");
+  assert.match(cmake, /set\(CMAKE_CXX_STANDARD 17\)/);
+  assert.match(cmake, /set\(CMAKE_CXX_STANDARD_REQUIRED ON\)/);
+  assert.match(cmake, /set\(CMAKE_CXX_EXTENSIONS OFF\)/);
+});
