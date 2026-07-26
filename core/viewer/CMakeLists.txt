@@ -1,6 +1,7 @@
 add_library(netft_viewer_core STATIC
   src/plot_aggregator.cpp
   src/recorder.cpp
+  src/session.cpp
 )
 target_compile_features(netft_viewer_core PUBLIC cxx_std_17)
 target_include_directories(netft_viewer_core PUBLIC include)
@@ -65,4 +66,21 @@ if(BUILD_TESTING)
     ${_netft_viewer_gtest_main}
   )
   add_test(NAME PlotAggregator COMMAND netft_viewer_plot_aggregator)
+
+  add_executable(netft_viewer_session
+    ${PROJECT_SOURCE_DIR}/test/core/test_session.cpp
+    ${PROJECT_SOURCE_DIR}/core/netft/test/support/fake_http_server.cpp
+    ${PROJECT_SOURCE_DIR}/core/netft/test/support/fake_sensor.cpp
+  )
+  target_include_directories(netft_viewer_session PRIVATE
+    ${PROJECT_SOURCE_DIR}/test
+    ${PROJECT_SOURCE_DIR}/core/netft/test
+    ${PROJECT_SOURCE_DIR}/core/netft/src
+  )
+  target_link_libraries(netft_viewer_session PRIVATE
+    netft_viewer_core
+    netft_test_socket
+    ${_netft_viewer_gtest_main}
+  )
+  add_test(NAME ViewerSession COMMAND netft_viewer_session)
 endif()
