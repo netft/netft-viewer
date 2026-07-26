@@ -20,6 +20,9 @@
 #include <sys/stat.h>
 #else
 #include <fcntl.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -159,19 +162,32 @@ public:
       return false;
     }
 #else
-    if (overwrite == OverwritePolicy::Refuse) {
-      std::error_code exists_error;
-      if (std::filesystem::exists(final_path, exists_error)) {
-        error = "CSV destination appeared before promotion";
+    if (overwrite == OverwritePolicy::Replace) {
+      if (::rename(partial_path.c_str(), final_path.c_str()) != 0) {
+        error = system_error_text("CSV promotion failed");
         return false;
       }
-      if (exists_error) {
-        error = "CSV destination check failed: " + exists_error.message();
-        return false;
-      }
+      return true;
     }
-    if (::rename(partial_path.c_str(), final_path.c_str()) != 0) {
-      error = system_error_text("CSV promotion failed");
+
+#if defined(__linux__) && defined(SYS_renameat2)
+    constexpr unsigned int rename_no_replace = 1U;
+    if (::syscall(SYS_renameat2, AT_FDCWD, partial_path.c_str(), AT_FDCWD,
+                  final_path.c_str(), rename_no_replace) == 0) {
+      return true;
+    }
+    if (errno != ENOSYS && errno != EINVAL && errno != EOPNOTSUPP) {
+      error = system_error_text("CSV no-replace promotion failed");
+      return false;
+    }
+#endif
+
+    if (::link(partial_path.c_str(), final_path.c_str()) != 0) {
+      error = system_error_text("CSV no-replace promotion failed");
+      return false;
+    }
+    if (::unlink(partial_path.c_str()) != 0) {
+      error = system_error_text("CSV partial unlink after promotion failed");
       return false;
     }
 #endif
@@ -235,6 +251,7 @@ Recorder::Recorder(RecorderOptions options,
   if (options_.flush_interval <= std::chrono::milliseconds::zero()) {
     throw std::invalid_argument("recorder flush interval must be positive");
   }
+  last_error_.reserve(256);
 }
 
 Recorder::~Recorder() {
@@ -276,7 +293,11 @@ RecorderResult Recorder::start(const std::filesystem::path &target,
   accepted_samples_.store(0, std::memory_order_relaxed);
   written_samples_.store(0, std::memory_order_relaxed);
   bytes_written_.store(0, std::memory_order_relaxed);
-  writer_done_.store(false, std::memory_order_release);
+  failure_code_.store(FailureCode::None, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+    writer_done_ = false;
+  }
   {
     std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
     final_path_ = target;
@@ -286,10 +307,20 @@ RecorderResult Recorder::start(const std::filesystem::path &target,
   }
 
   std::string error;
-  file_ = storage_->create_exclusive(partial, error);
+  try {
+    file_ = storage_->create_exclusive(partial, error);
+  } catch (const std::exception &exception) {
+    enter_error(exception.what());
+    publish_writer_done();
+    return RecorderResult::Failed;
+  } catch (...) {
+    enter_error("unexpected exception while creating CSV partial");
+    publish_writer_done();
+    return RecorderResult::Failed;
+  }
   if (!file_) {
     state_.store(RecordingState::Idle, std::memory_order_release);
-    writer_done_.store(true, std::memory_order_release);
+    publish_writer_done();
     std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
     last_error_ = std::move(error);
     std::error_code ignored;
@@ -298,57 +329,74 @@ RecorderResult Recorder::start(const std::filesystem::path &target,
     }
     return RecorderResult::Failed;
   }
-  if (!file_->write(csv_header, error) || !file_->flush(error)) {
-    std::string close_error;
-    file_->close(close_error);
+  try {
+    if (!file_->write(csv_header, error) || !file_->flush(error)) {
+      enter_error(error);
+      finish_error_file();
+      publish_writer_done();
+      return RecorderResult::Failed;
+    }
     bytes_written_.store(file_->bytes_written(), std::memory_order_relaxed);
-    file_.reset();
-    enter_error(error);
-    writer_done_.store(true, std::memory_order_release);
+  } catch (const std::exception &exception) {
+    enter_error(exception.what());
+    finish_error_file();
+    publish_writer_done();
+    return RecorderResult::Failed;
+  } catch (...) {
+    enter_error("unexpected exception while preparing CSV partial");
+    finish_error_file();
+    publish_writer_done();
     return RecorderResult::Failed;
   }
 
   recording_steady_origin_ = clock_->steady_now();
   recording_system_origin_ = clock_->system_now();
-  bytes_written_.store(file_->bytes_written(), std::memory_order_relaxed);
   state_.store(RecordingState::Recording, std::memory_order_release);
-  accepting_.store(true, std::memory_order_release);
+  if (!submission_gate_.try_open()) {
+    enter_error("recording submission gate did not drain before start");
+    finish_error_file();
+    publish_writer_done();
+    return RecorderResult::Failed;
+  }
   try {
     writer_thread_ = std::thread(&Recorder::writer_loop, this);
   } catch (const std::exception &exception) {
-    accepting_.store(false, std::memory_order_release);
-    enter_error(std::string{"CSV writer thread creation failed: "} +
-                exception.what());
+    submission_gate_.close();
+    enter_error(exception.what());
     finish_error_file();
-    writer_done_.store(true, std::memory_order_release);
+    publish_writer_done();
+    return RecorderResult::Failed;
+  } catch (...) {
+    submission_gate_.close();
+    enter_error("unexpected exception while creating CSV writer thread");
+    finish_error_file();
+    publish_writer_done();
     return RecorderResult::Failed;
   }
   return RecorderResult::Ok;
 }
 
 SubmitResult Recorder::submit(const netft::Sample &sample) noexcept {
-  if (!accepting_.load(std::memory_order_acquire)) {
-    return closed_gate_result();
-  }
-
-  in_flight_submissions_.fetch_add(1, std::memory_order_acq_rel);
-  if (!accepting_.load(std::memory_order_acquire)) {
-    finish_submit();
-    return closed_gate_result();
+  auto entry = submission_gate_.enter();
+  if (!entry.accepted()) {
+    const auto result = closed_gate_result();
+    entry.release();
+    writer_condition_.notify_one();
+    return result;
   }
 
   const auto recorded = make_recorded_sample(sample, recording_steady_origin_,
                                              recording_system_origin_);
   if (!queue_.try_push(recorded)) {
-    accepting_.store(false, std::memory_order_release);
-    enter_error("recording queue overflow");
-    finish_submit();
+    submission_gate_.close();
+    enter_overflow_error();
+    entry.release();
     writer_condition_.notify_one();
     return SubmitResult::Overflow;
   }
 
   accepted_samples_.fetch_add(1, std::memory_order_relaxed);
-  finish_submit();
+  entry.release();
   writer_condition_.notify_one();
   return SubmitResult::Accepted;
 }
@@ -359,23 +407,21 @@ RecorderResult Recorder::pause() {
     return RecorderResult::InvalidState;
   }
 
-  accepting_.store(false, std::memory_order_release);
-  state_.store(RecordingState::Pausing, std::memory_order_release);
-  {
-    std::unique_lock<std::mutex> wait_lock(wait_mutex_);
-    control_condition_.wait(wait_lock, [&] {
-      return in_flight_submissions_.load(std::memory_order_acquire) == 0U;
-    });
+  submission_gate_.close();
+  std::unique_lock<std::mutex> wait_lock(wait_mutex_);
+  auto expected = RecordingState::Recording;
+  if (!state_.compare_exchange_strong(expected, RecordingState::Pausing,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire)) {
+    if (expected != RecordingState::Error) {
+      return RecorderResult::InvalidState;
+    }
   }
   writer_condition_.notify_one();
-  {
-    std::unique_lock<std::mutex> wait_lock(wait_mutex_);
-    control_condition_.wait(wait_lock, [&] {
-      const auto current = state_.load(std::memory_order_acquire);
-      return current == RecordingState::Paused ||
-             current == RecordingState::Error;
-    });
-  }
+  control_condition_.wait(wait_lock, [&] {
+    return state_.load(std::memory_order_acquire) == RecordingState::Paused ||
+           writer_done_;
+  });
   return state_.load(std::memory_order_acquire) == RecordingState::Paused
              ? RecorderResult::Ok
              : RecorderResult::Failed;
@@ -383,11 +429,18 @@ RecorderResult Recorder::pause() {
 
 RecorderResult Recorder::resume() {
   std::lock_guard<std::mutex> operation_lock(operation_mutex_);
-  if (state_.load(std::memory_order_acquire) != RecordingState::Paused) {
+  std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+  auto expected = RecordingState::Paused;
+  if (!state_.compare_exchange_strong(expected, RecordingState::Recording,
+                                      std::memory_order_acq_rel,
+                                      std::memory_order_acquire)) {
     return RecorderResult::InvalidState;
   }
-  state_.store(RecordingState::Recording, std::memory_order_release);
-  accepting_.store(true, std::memory_order_release);
+  if (!submission_gate_.try_open()) {
+    enter_error("recording submission gate was not drained at resume");
+    writer_condition_.notify_one();
+    return RecorderResult::Failed;
+  }
   writer_condition_.notify_one();
   return RecorderResult::Ok;
 }
@@ -399,22 +452,20 @@ RecorderResult Recorder::stop() {
     return RecorderResult::InvalidState;
   }
 
-  accepting_.store(false, std::memory_order_release);
-  if (current != RecordingState::Error) {
-    state_.store(RecordingState::Stopping, std::memory_order_release);
-  }
+  submission_gate_.close();
   {
     std::unique_lock<std::mutex> wait_lock(wait_mutex_);
-    control_condition_.wait(wait_lock, [&] {
-      return in_flight_submissions_.load(std::memory_order_acquire) == 0U;
-    });
-  }
-  writer_condition_.notify_one();
-  {
-    std::unique_lock<std::mutex> wait_lock(wait_mutex_);
-    control_condition_.wait(wait_lock, [&] {
-      return writer_done_.load(std::memory_order_acquire);
-    });
+    current = state_.load(std::memory_order_acquire);
+    while (current != RecordingState::Error &&
+           current != RecordingState::Stopping) {
+      if (state_.compare_exchange_weak(current, RecordingState::Stopping,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        break;
+      }
+    }
+    writer_condition_.notify_one();
+    control_condition_.wait(wait_lock, [&] { return writer_done_; });
   }
   if (writer_thread_.joinable()) {
     writer_thread_.join();
@@ -437,6 +488,10 @@ RecorderSnapshot Recorder::snapshot() const {
     result.partial_path = partial_path_;
     result.last_error = last_error_;
   }
+  if (failure_code_.load(std::memory_order_acquire) ==
+      FailureCode::QueueOverflow) {
+    result.last_error = "recording queue overflow";
+  }
   return result;
 }
 
@@ -457,14 +512,20 @@ SubmitResult Recorder::closed_gate_result() const noexcept {
   return SubmitResult::Failed;
 }
 
-void Recorder::finish_submit() noexcept {
-  if (in_flight_submissions_.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
-    control_condition_.notify_all();
-    writer_condition_.notify_one();
+void Recorder::writer_loop() noexcept {
+  try {
+    writer_loop_impl();
+  } catch (const std::exception &exception) {
+    enter_error(exception.what());
+    finish_error_file();
+  } catch (...) {
+    enter_error("unexpected exception in CSV writer thread");
+    finish_error_file();
   }
+  publish_writer_done();
 }
 
-void Recorder::writer_loop() {
+void Recorder::writer_loop_impl() {
   auto next_flush = std::chrono::steady_clock::now() + options_.flush_interval;
   for (;;) {
     if (!write_available_batch()) {
@@ -478,16 +539,28 @@ void Recorder::writer_loop() {
         finish_error_file();
         break;
       }
-      state_.store(RecordingState::Paused, std::memory_order_release);
+      std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+      auto expected = RecordingState::Pausing;
+      if (!state_.compare_exchange_strong(expected, RecordingState::Paused,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire)) {
+        finish_error_file();
+        break;
+      }
       control_condition_.notify_all();
       next_flush = std::chrono::steady_clock::now() + options_.flush_interval;
       continue;
     }
     if (current == RecordingState::Stopping && drain_complete()) {
       if (flush_file() && close_file() && promote_file()) {
-        state_.store(RecordingState::Idle, std::memory_order_release);
-        std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
-        partial_path_.clear();
+        std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+        auto expected = RecordingState::Stopping;
+        if (state_.compare_exchange_strong(expected, RecordingState::Idle,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_acquire)) {
+          std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
+          partial_path_.clear();
+        }
       } else {
         finish_error_file();
       }
@@ -521,7 +594,13 @@ void Recorder::writer_loop() {
       });
     }
   }
-  writer_done_.store(true, std::memory_order_release);
+}
+
+void Recorder::publish_writer_done() {
+  {
+    std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+    writer_done_ = true;
+  }
   control_condition_.notify_all();
 }
 
@@ -596,7 +675,7 @@ bool Recorder::promote_file() {
 }
 
 void Recorder::enter_error(std::string_view error) noexcept {
-  accepting_.store(false, std::memory_order_release);
+  submission_gate_.close();
   try {
     std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
     if (last_error_.empty()) {
@@ -606,25 +685,57 @@ void Recorder::enter_error(std::string_view error) noexcept {
     // State publication still makes the failure visible if diagnostics cannot
     // allocate.
   }
-  state_.store(RecordingState::Error, std::memory_order_release);
+  auto current = state_.load(std::memory_order_acquire);
+  while (current != RecordingState::Error && current != RecordingState::Idle &&
+         !state_.compare_exchange_weak(current, RecordingState::Error,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+  }
   writer_condition_.notify_one();
-  control_condition_.notify_all();
+}
+
+void Recorder::enter_overflow_error() noexcept {
+  submission_gate_.close();
+  failure_code_.store(FailureCode::QueueOverflow, std::memory_order_release);
+  auto current = state_.load(std::memory_order_acquire);
+  while (current != RecordingState::Error && current != RecordingState::Idle &&
+         !state_.compare_exchange_weak(current, RecordingState::Error,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+  }
+  writer_condition_.notify_one();
 }
 
 void Recorder::finish_error_file() noexcept {
   if (!file_) {
     return;
   }
-  std::string ignored;
-  file_->flush(ignored);
-  file_->close(ignored);
+  std::string error;
+  try {
+    if (!file_->flush(error) && !error.empty()) {
+      enter_error(error);
+    }
+  } catch (const std::exception &exception) {
+    enter_error(exception.what());
+  } catch (...) {
+    enter_error("unexpected exception while flushing failed CSV");
+  }
+  error.clear();
+  try {
+    if (!file_->close(error) && !error.empty()) {
+      enter_error(error);
+    }
+  } catch (const std::exception &exception) {
+    enter_error(exception.what());
+  } catch (...) {
+    enter_error("unexpected exception while closing failed CSV");
+  }
   bytes_written_.store(file_->bytes_written(), std::memory_order_relaxed);
   file_.reset();
 }
 
 bool Recorder::drain_complete() const noexcept {
-  return queue_.size() == 0U &&
-         in_flight_submissions_.load(std::memory_order_acquire) == 0U;
+  return queue_.size() == 0U && submission_gate_.drained();
 }
 
 } // namespace netft_viewer

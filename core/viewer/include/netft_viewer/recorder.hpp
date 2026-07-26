@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "netft/types.hpp"
+#include "netft_viewer/detail/submission_gate.hpp"
 #include "netft_viewer/recorded_sample.hpp"
 #include "netft_viewer/recording_queue.hpp"
 
@@ -100,14 +101,18 @@ public:
   RecorderSnapshot snapshot() const;
 
 private:
+  enum class FailureCode { None, QueueOverflow };
+
   SubmitResult closed_gate_result() const noexcept;
-  void finish_submit() noexcept;
-  void writer_loop();
+  void writer_loop() noexcept;
+  void writer_loop_impl();
+  void publish_writer_done();
   bool write_available_batch();
   bool flush_file();
   bool close_file();
   bool promote_file();
   void enter_error(std::string_view error) noexcept;
+  void enter_overflow_error() noexcept;
   void finish_error_file() noexcept;
   bool drain_complete() const noexcept;
 
@@ -115,18 +120,18 @@ private:
   std::shared_ptr<RecorderClock> clock_;
   std::shared_ptr<RecorderStorage> storage_;
   RecordingQueue<RecordedSample, recording_queue_capacity> queue_;
+  detail::SubmissionGate submission_gate_;
 
   std::atomic<RecordingState> state_{RecordingState::Idle};
-  std::atomic<bool> accepting_{false};
-  std::atomic<std::uint32_t> in_flight_submissions_{0};
   std::atomic<std::uint64_t> accepted_samples_{0};
   std::atomic<std::uint64_t> written_samples_{0};
   std::atomic<std::uint64_t> bytes_written_{0};
-  std::atomic<bool> writer_done_{true};
+  std::atomic<FailureCode> failure_code_{FailureCode::None};
 
   mutable std::mutex operation_mutex_;
   mutable std::mutex metadata_mutex_;
   std::mutex wait_mutex_;
+  bool writer_done_{true};
   std::condition_variable writer_condition_;
   std::condition_variable control_condition_;
   std::thread writer_thread_;

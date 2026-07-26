@@ -4,6 +4,7 @@
 #include <thread>
 #include <vector>
 
+#include "netft_viewer/detail/submission_gate.hpp"
 #include "netft_viewer/recording_queue.hpp"
 
 namespace netft_viewer {
@@ -61,6 +62,65 @@ TEST(RecordingQueueTest, TransfersConcurrentValuesWithoutLossOrReordering) {
   for (int value = 0; value < value_count; ++value) {
     EXPECT_EQ(received[static_cast<std::size_t>(value)], value);
   }
+}
+
+TEST(RecordingQueueTest, ApproximateSizeRemainsBoundedDuringConcurrentUse) {
+  constexpr int value_count = 100'000;
+  RecordingQueue<int, 128> queue;
+  std::atomic<bool> producer_done{false};
+  std::atomic<bool> size_out_of_bounds{false};
+
+  std::thread producer([&] {
+    for (int value = 0; value < value_count; ++value) {
+      while (!queue.try_push(value)) {
+        if (queue.size() > queue.capacity()) {
+          size_out_of_bounds.store(true, std::memory_order_relaxed);
+        }
+        std::this_thread::yield();
+      }
+    }
+    producer_done.store(true, std::memory_order_release);
+  });
+
+  while (!producer_done.load(std::memory_order_acquire) || queue.size() != 0U) {
+    if (queue.size() > queue.capacity()) {
+      size_out_of_bounds.store(true, std::memory_order_relaxed);
+    }
+    int value{};
+    queue.try_pop(value);
+  }
+  producer.join();
+
+  EXPECT_FALSE(size_out_of_bounds.load(std::memory_order_relaxed));
+  static_assert(RecordingQueue<int, 128>::capacity() == 128U,
+                "queue capacity is part of its compile-time contract");
+}
+
+TEST(SubmissionGateTest, CannotReopenUntilEveryPreCloseEntryLeaves) {
+  detail::SubmissionGate gate;
+  ASSERT_TRUE(gate.try_open());
+
+  auto entry = gate.enter();
+  ASSERT_TRUE(entry.accepted());
+  gate.close();
+
+  EXPECT_FALSE(gate.drained());
+  EXPECT_FALSE(gate.try_open());
+  entry.release();
+  EXPECT_TRUE(gate.drained());
+  EXPECT_TRUE(gate.try_open());
+}
+
+TEST(SubmissionGateTest, EntryBeginsInFlightAccountingBeforeGateDecision) {
+  detail::SubmissionGate gate;
+  gate.close();
+
+  auto entry = gate.enter();
+
+  EXPECT_FALSE(entry.accepted());
+  EXPECT_FALSE(gate.drained());
+  entry.release();
+  EXPECT_TRUE(gate.drained());
 }
 
 } // namespace

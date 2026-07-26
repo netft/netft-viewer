@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -22,6 +23,10 @@ struct ControlledWriterState {
   bool fail_close{false};
   bool fail_create{false};
   bool fail_promote{false};
+  bool throw_write{false};
+  bool throw_flush{false};
+  bool throw_close{false};
+  bool throw_promote{false};
   std::size_t write_calls{0};
   std::size_t flush_calls{0};
   std::size_t close_calls{0};
@@ -41,6 +46,9 @@ public:
     state_->write_entered = true;
     state_->condition.notify_all();
     state_->condition.wait(lock, [&] { return !state_->block_writes; });
+    if (state_->throw_write) {
+      throw std::runtime_error{"injected throwing write"};
+    }
     if (state_->fail_write) {
       error = "injected write failure";
       return false;
@@ -54,6 +62,9 @@ public:
     std::lock_guard<std::mutex> lock(state_->mutex);
     ++state_->flush_calls;
     state_->condition.notify_all();
+    if (state_->throw_flush) {
+      throw std::runtime_error{"injected throwing flush"};
+    }
     if (state_->fail_flush) {
       error = "injected flush failure";
       return false;
@@ -65,6 +76,9 @@ public:
     std::lock_guard<std::mutex> lock(state_->mutex);
     ++state_->close_calls;
     state_->condition.notify_all();
+    if (state_->throw_close) {
+      throw std::runtime_error{"injected throwing close"};
+    }
     if (state_->fail_close) {
       error = "injected close failure";
       return false;
@@ -102,6 +116,9 @@ public:
     std::lock_guard<std::mutex> lock(state_->mutex);
     ++state_->promote_calls;
     state_->condition.notify_all();
+    if (state_->throw_promote) {
+      throw std::runtime_error{"injected throwing promotion"};
+    }
     if (state_->fail_promote) {
       error = "injected promotion failure";
       return false;

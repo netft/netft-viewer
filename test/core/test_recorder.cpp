@@ -8,7 +8,6 @@
 #include <memory>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "netft_viewer/recorder.hpp"
@@ -93,18 +92,6 @@ std::vector<std::string> split_csv_row(const std::string &line) {
     fields.push_back(std::move(field));
   }
   return fields;
-}
-
-bool wait_for_state(Recorder &recorder, RecordingState state,
-                    std::chrono::milliseconds timeout = 2s) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (recorder.snapshot().state == state) {
-      return true;
-    }
-    std::this_thread::sleep_for(1ms);
-  }
-  return recorder.snapshot().state == state;
 }
 
 TEST(RecorderTest, PauseDrainsAndResumeLeavesSequenceAndTimestampGap) {
@@ -236,6 +223,7 @@ TEST(RecorderTest, OverflowStopsAcceptanceWithoutBlockingTheProducer) {
   test::unblock_writes(state);
   EXPECT_EQ(recorder.stop(), RecorderResult::Failed);
   const auto snapshot = recorder.snapshot();
+  EXPECT_EQ(snapshot.state, RecordingState::Error);
   EXPECT_EQ(snapshot.written_samples, snapshot.accepted_samples);
 }
 
@@ -253,8 +241,8 @@ TEST(RecorderTest, WriteFailureEntersErrorAndNeverPromotesThePartial) {
 
   ASSERT_EQ(recorder.submit(sample_at(1U, std::chrono::steady_clock::now())),
             SubmitResult::Accepted);
-  ASSERT_TRUE(wait_for_state(recorder, RecordingState::Error));
   EXPECT_EQ(recorder.stop(), RecorderResult::Failed);
+  EXPECT_EQ(recorder.snapshot().state, RecordingState::Error);
   std::lock_guard<std::mutex> lock(state->mutex);
   EXPECT_EQ(state->promote_calls, 0U);
 }
@@ -295,6 +283,65 @@ TEST(RecorderTest,
   EXPECT_TRUE(std::filesystem::is_directory(target));
   EXPECT_TRUE(std::filesystem::exists(partial));
   EXPECT_GE(std::filesystem::file_size(partial), 1U);
+}
+
+TEST(RecorderTest, RefusePromotionDoesNotClobberADestinationCreatedAfterStart) {
+  TestDirectory directory;
+  const auto target = directory.file();
+  const auto partial = std::filesystem::path(target.string() + ".partial");
+  Recorder recorder;
+  ASSERT_EQ(recorder.start(target, OverwritePolicy::Refuse),
+            RecorderResult::Ok);
+  ASSERT_EQ(recorder.submit(sample_at(8U, std::chrono::steady_clock::now())),
+            SubmitResult::Accepted);
+  {
+    std::ofstream competitor(target);
+    competitor << "competitor-data";
+  }
+
+  EXPECT_EQ(recorder.stop(), RecorderResult::Failed);
+  EXPECT_EQ(read_lines(target), (std::vector<std::string>{"competitor-data"}));
+  EXPECT_TRUE(std::filesystem::exists(partial));
+}
+
+TEST(RecorderTest, ThrowingWriterIsContainedAndLeavesTheRecordingInError) {
+  auto state = std::make_shared<test::ControlledWriterState>();
+  auto storage = std::make_shared<test::ControlledRecorderStorage>(state);
+  Recorder recorder(RecorderOptions{}, std::make_shared<FixedRecorderClock>(),
+                    storage);
+  ASSERT_EQ(recorder.start("throwing-write.csv", OverwritePolicy::Refuse),
+            RecorderResult::Ok);
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->throw_write = true;
+    state->throw_flush = true;
+    state->throw_close = true;
+  }
+
+  ASSERT_EQ(recorder.submit(sample_at(1U, std::chrono::steady_clock::now())),
+            SubmitResult::Accepted);
+  EXPECT_EQ(recorder.stop(), RecorderResult::Failed);
+  EXPECT_EQ(recorder.snapshot().state, RecordingState::Error);
+  EXPECT_FALSE(recorder.snapshot().last_error.empty());
+}
+
+TEST(RecorderTest, ThrowingPromotionIsContainedAndRetainsErrorState) {
+  auto state = std::make_shared<test::ControlledWriterState>();
+  auto storage = std::make_shared<test::ControlledRecorderStorage>(state);
+  Recorder recorder(RecorderOptions{}, std::make_shared<FixedRecorderClock>(),
+                    storage);
+  ASSERT_EQ(recorder.start("throwing-promotion.csv", OverwritePolicy::Refuse),
+            RecorderResult::Ok);
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->throw_promote = true;
+  }
+
+  ASSERT_EQ(recorder.submit(sample_at(1U, std::chrono::steady_clock::now())),
+            SubmitResult::Accepted);
+  EXPECT_EQ(recorder.stop(), RecorderResult::Failed);
+  EXPECT_EQ(recorder.snapshot().state, RecordingState::Error);
+  EXPECT_FALSE(recorder.snapshot().last_error.empty());
 }
 
 TEST(RecorderTest, StopDrainsAllAcceptedRowsBeforeAtomicPromotion) {
