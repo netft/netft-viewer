@@ -1,18 +1,7 @@
+#include "support/socket_runtime.hpp"
+
 #include "detail/protocol.hpp"
 #include "detail/udp_transport.hpp"
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
 
 #include <gtest/gtest.h>
 
@@ -20,6 +9,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <stdexcept>
 #include <string>
@@ -29,80 +19,36 @@ namespace {
 
 using namespace std::chrono_literals;
 
-#ifdef _WIN32
-using NativeSocket = SOCKET;
-constexpr NativeSocket kInvalidSocket = INVALID_SOCKET;
-
-class SocketRuntime {
-public:
-  SocketRuntime() {
-    WSADATA data{};
-    if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-      throw std::runtime_error("test UDP runtime startup failed");
-    }
-  }
-
-  ~SocketRuntime() { ::WSACleanup(); }
-};
-
-void close_socket(const NativeSocket socket) { ::closesocket(socket); }
-#else
-using NativeSocket = int;
-constexpr NativeSocket kInvalidSocket = -1;
-
-class SocketRuntime {};
-
-void close_socket(const NativeSocket socket) { ::close(socket); }
-#endif
-
 class FakeUdpPeer {
 public:
   FakeUdpPeer() {
-    socket_ = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket_ == kInvalidSocket) {
+    socket_ = netft::test::create_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!netft::test::socket_is_valid(socket_)) {
       throw std::runtime_error("test UDP socket creation failed");
     }
 
-#ifdef _WIN32
-    const DWORD timeout = 1000;
-    static_cast<void>(::setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
-                                   reinterpret_cast<const char *>(&timeout),
-                                   sizeof(timeout)));
-#else
-    const timeval timeout{1, 0};
-    static_cast<void>(::setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                                   sizeof(timeout)));
-#endif
+    static_cast<void>(netft::test::set_socket_receive_timeout(
+        socket_, std::chrono::seconds{1}));
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::bind(socket_, reinterpret_cast<sockaddr *>(&address),
-               sizeof(address)) != 0) {
-      close_socket(socket_);
-      socket_ = kInvalidSocket;
+               static_cast<netft::test::SocketLength>(sizeof(address))) != 0) {
+      netft::test::close_socket(socket_);
       throw std::runtime_error("test UDP bind failed");
     }
 
-#ifdef _WIN32
-    int address_size = sizeof(address);
-#else
-    socklen_t address_size = sizeof(address);
-#endif
+    netft::test::SocketLength address_size = sizeof(address);
     if (::getsockname(socket_, reinterpret_cast<sockaddr *>(&address),
                       &address_size) != 0) {
-      close_socket(socket_);
-      socket_ = kInvalidSocket;
+      netft::test::close_socket(socket_);
       throw std::runtime_error("test UDP getsockname failed");
     }
     port_ = ntohs(address.sin_port);
   }
 
-  ~FakeUdpPeer() {
-    if (socket_ != kInvalidSocket) {
-      close_socket(socket_);
-    }
-  }
+  ~FakeUdpPeer() { netft::test::close_socket(socket_); }
 
   FakeUdpPeer(const FakeUdpPeer &) = delete;
   FakeUdpPeer &operator=(const FakeUdpPeer &) = delete;
@@ -113,33 +59,27 @@ public:
   std::array<std::uint8_t, 8>
   reply_with(const std::array<std::uint8_t, 36> &record) {
     sockaddr_in client{};
-#ifdef _WIN32
-    int client_size = sizeof(client);
-#else
-    socklen_t client_size = sizeof(client);
-#endif
+    netft::test::SocketLength client_size = sizeof(client);
     std::array<std::uint8_t, 8> request{};
-    const auto received =
-        ::recvfrom(socket_, reinterpret_cast<char *>(request.data()),
-                   static_cast<int>(request.size()), 0,
-                   reinterpret_cast<sockaddr *>(&client), &client_size);
-    if (received != static_cast<decltype(received)>(request.size())) {
+    const auto received = netft::test::receive_from_socket(
+        socket_, request.data(), request.size(), 0,
+        reinterpret_cast<sockaddr *>(&client), &client_size);
+    if (received != static_cast<std::ptrdiff_t>(request.size())) {
       throw std::runtime_error("test UDP request receive failed");
     }
 
-    const auto sent =
-        ::sendto(socket_, reinterpret_cast<const char *>(record.data()),
-                 static_cast<int>(record.size()), 0,
-                 reinterpret_cast<sockaddr *>(&client), client_size);
-    if (sent != static_cast<decltype(sent)>(record.size())) {
+    const auto sent = netft::test::send_to_socket(
+        socket_, record.data(), record.size(), 0,
+        reinterpret_cast<sockaddr *>(&client), client_size);
+    if (sent != static_cast<std::ptrdiff_t>(record.size())) {
       throw std::runtime_error("test UDP record send failed");
     }
     return request;
   }
 
 private:
-  SocketRuntime runtime_;
-  NativeSocket socket_{kInvalidSocket};
+  netft::test::SocketRuntime runtime_;
+  netft::test::NativeSocket socket_{netft::test::kInvalidSocket};
   std::string host_{"127.0.0.1"};
   int port_{};
 };
@@ -169,12 +109,24 @@ TEST(UdpTransportTest, ShutdownInterruptsAWaitAsANonRecordResult) {
   netft::detail::UdpTransport transport;
   transport.connect(peer.host(), peer.port());
 
+  std::promise<void> wait_started;
+  auto wait_started_future = wait_started.get_future();
+  transport.set_wait_started_test_hook(
+      [](void *context) noexcept {
+        try {
+          static_cast<std::promise<void> *>(context)->set_value();
+        } catch (...) {
+          std::terminate();
+        }
+      },
+      &wait_started);
+
   std::array<std::uint8_t, 64> bytes{};
   auto pending_receive = std::async(std::launch::async, [&] {
     return transport.receive(bytes.data(), bytes.size(),
                              std::chrono::seconds{5});
   });
-  std::this_thread::sleep_for(20ms);
+  ASSERT_EQ(wait_started_future.wait_for(500ms), std::future_status::ready);
   transport.shutdown();
 
   ASSERT_EQ(pending_receive.wait_for(500ms), std::future_status::ready);

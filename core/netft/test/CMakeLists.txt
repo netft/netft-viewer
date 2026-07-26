@@ -37,6 +37,22 @@ target_link_libraries(netft_fault_latch PRIVATE netft_viewer_netft ${NETFT_GTEST
 
 add_test(NAME netft_fault_latch COMMAND netft_fault_latch)
 
+add_library(netft_test_socket INTERFACE)
+target_include_directories(netft_test_socket INTERFACE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+if(WIN32)
+  target_link_libraries(netft_test_socket INTERFACE ws2_32)
+endif()
+
+add_executable(netft_socket_runtime test_socket_runtime.cpp)
+target_link_libraries(netft_socket_runtime PRIVATE
+  netft_test_socket
+  ${NETFT_GTEST_MAIN_TARGET}
+)
+
+add_test(NAME netft_socket_runtime COMMAND netft_socket_runtime)
+
 if(NOT WIN32)
   add_executable(netft_posix_transport
     test_posix_transport.cpp
@@ -62,11 +78,9 @@ target_include_directories(netft_udp_transport PRIVATE
 )
 target_link_libraries(netft_udp_transport PRIVATE
   netft_viewer_netft
+  netft_test_socket
   ${NETFT_GTEST_MAIN_TARGET}
 )
-if(WIN32)
-  target_link_libraries(netft_udp_transport PRIVATE ws2_32)
-endif()
 
 add_test(NAME netft_udp_transport COMMAND netft_udp_transport)
 
@@ -79,7 +93,11 @@ target_include_directories(netft_discovery PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
-target_link_libraries(netft_discovery PRIVATE netft_viewer_netft ${NETFT_GTEST_MAIN_TARGET})
+target_link_libraries(netft_discovery PRIVATE
+  netft_viewer_netft
+  netft_test_socket
+  ${NETFT_GTEST_MAIN_TARGET}
+)
 
 add_test(NAME netft_discovery COMMAND netft_discovery)
 
@@ -92,7 +110,11 @@ target_include_directories(netft_client_stream PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
-target_link_libraries(netft_client_stream PRIVATE netft_viewer_netft ${NETFT_GTEST_MAIN_TARGET})
+target_link_libraries(netft_client_stream PRIVATE
+  netft_viewer_netft
+  netft_test_socket
+  ${NETFT_GTEST_MAIN_TARGET}
+)
 
 add_test(NAME netft_client_stream COMMAND netft_client_stream)
 
@@ -105,7 +127,11 @@ target_include_directories(netft_client_recovery PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
-target_link_libraries(netft_client_recovery PRIVATE netft_viewer_netft ${NETFT_GTEST_MAIN_TARGET})
+target_link_libraries(netft_client_recovery PRIVATE
+  netft_viewer_netft
+  netft_test_socket
+  ${NETFT_GTEST_MAIN_TARGET}
+)
 
 add_test(NAME netft_client_recovery COMMAND netft_client_recovery)
 
@@ -132,6 +158,7 @@ target_include_directories(netft_client_lifecycle PRIVATE
 )
 target_link_libraries(netft_client_lifecycle PRIVATE
   netft_client_impl_test
+  netft_test_socket
   ${NETFT_GTEST_MAIN_TARGET}
 )
 

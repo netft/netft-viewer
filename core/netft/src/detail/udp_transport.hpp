@@ -21,6 +21,8 @@ public:
 
 class UdpTransport {
 public:
+  using WaitStartedTestHook = void (*)(void *) noexcept;
+
   UdpTransport() = default;
   ~UdpTransport();
   UdpTransport(const UdpTransport &) = delete;
@@ -33,6 +35,13 @@ public:
   void shutdown() noexcept;
   void close() noexcept;
 
+  // Private-header synchronization seam for the transport contract test.
+  void set_wait_started_test_hook(WaitStartedTestHook hook, void *context) {
+    std::scoped_lock lock(mutex_);
+    wait_started_test_hook_ = hook;
+    wait_started_test_context_ = context;
+  }
+
 private:
 #ifdef _WIN32
   WinSockRuntime runtime_;
@@ -40,6 +49,8 @@ private:
   mutable std::mutex mutex_;
   std::uintptr_t socket_{~std::uintptr_t{0}};
   bool shutdown_requested_{false};
+  WaitStartedTestHook wait_started_test_hook_{nullptr};
+  void *wait_started_test_context_{nullptr};
 };
 
 } // namespace netft::detail

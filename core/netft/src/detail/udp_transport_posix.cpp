@@ -98,6 +98,8 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
                                   const std::size_t capacity,
                                   const std::chrono::duration<double> timeout) {
   int socket = -1;
+  WaitStartedTestHook wait_started_hook = nullptr;
+  void *wait_started_context = nullptr;
   {
     std::scoped_lock lock(mutex_);
     if (socket_ == kInvalidSocket) {
@@ -107,12 +109,17 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
       return 0;
     }
     socket = static_cast<int>(socket_);
+    wait_started_hook = wait_started_test_hook_;
+    wait_started_context = wait_started_test_context_;
   }
 
   pollfd descriptor{socket, POLLIN, 0};
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   auto remaining = timeout;
   int poll_result{};
+  if (wait_started_hook != nullptr) {
+    wait_started_hook(wait_started_context);
+  }
   while (true) {
     poll_result = ::poll(&descriptor, 1, timeout_milliseconds(remaining));
     if (poll_result >= 0) {

@@ -134,6 +134,8 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
                                   const std::size_t capacity,
                                   const std::chrono::duration<double> timeout) {
   SOCKET socket = INVALID_SOCKET;
+  WaitStartedTestHook wait_started_hook = nullptr;
+  void *wait_started_context = nullptr;
   {
     std::scoped_lock lock(mutex_);
     if (socket_ == kInvalidSocket) {
@@ -143,9 +145,14 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
       return 0;
     }
     socket = native_socket(socket_);
+    wait_started_hook = wait_started_test_hook_;
+    wait_started_context = wait_started_test_context_;
   }
 
   WSAPOLLFD descriptor{socket, POLLRDNORM, 0};
+  if (wait_started_hook != nullptr) {
+    wait_started_hook(wait_started_context);
+  }
   const int poll_result =
       ::WSAPoll(&descriptor, 1, timeout_milliseconds(timeout));
   if (poll_result == SOCKET_ERROR) {

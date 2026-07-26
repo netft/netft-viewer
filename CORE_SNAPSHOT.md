@@ -39,6 +39,12 @@ cross-platform overlay:
 - The imported POSIX transport tests follow the renamed private type, while
   `test/test_udp_transport.cpp` exercises the common loopback UDP and shutdown
   contract on every platform.
+- `test/support/socket_runtime.hpp` provides shared POSIX and WinSock lifecycle
+  and I/O helpers for the local test peers. The imported fake HTTP server,
+  `FakeSensor`, and their discovery tests use that support without changing
+  their behavioral contracts. Only the Linux/glibc-specific forked
+  floating-point-trap test remains under its original narrow platform guard.
+- `test/test_socket_runtime.cpp` verifies the shared test socket lifecycle.
 
 These files are intentional viewer-local modifications and therefore are not
 expected to compare byte-for-byte with the upstream commit.
