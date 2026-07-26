@@ -1,1 +1,5 @@
-# Native targets are added by subsequent tasks.
+include("${PROJECT_SOURCE_DIR}/cmake/Dependencies.cmake")
+
+find_package(Threads REQUIRED)
+
+add_subdirectory(netft)
