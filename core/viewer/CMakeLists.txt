@@ -1,4 +1,5 @@
 add_library(netft_viewer_core STATIC
+  src/plot_aggregator.cpp
   src/recorder.cpp
 )
 target_compile_features(netft_viewer_core PUBLIC cxx_std_17)
@@ -52,4 +53,16 @@ if(BUILD_TESTING)
     ${_netft_viewer_gtest_main}
   )
   add_test(NAME Recorder COMMAND netft_viewer_recorder)
+
+  add_executable(netft_viewer_plot_aggregator
+    ${PROJECT_SOURCE_DIR}/test/core/test_plot_aggregator.cpp
+  )
+  target_include_directories(netft_viewer_plot_aggregator PRIVATE
+    ${PROJECT_SOURCE_DIR}/test
+  )
+  target_link_libraries(netft_viewer_plot_aggregator PRIVATE
+    netft_viewer_core
+    ${_netft_viewer_gtest_main}
+  )
+  add_test(NAME PlotAggregator COMMAND netft_viewer_plot_aggregator)
 endif()
