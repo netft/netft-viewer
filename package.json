@@ -5,20 +5,49 @@
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.17.0",
+  "main": ".vite/build/main.js",
   "scripts": {
     "check:versions": "node tools/check-versions.mjs",
-    "test:project": "node --test test/project/version.test.mjs",
-    "test:protocol": "vitest run test/electron/protocol.test.ts"
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "prelint": "node tools/eslint/check-toolchain.mjs",
+    "lint": "tools/eslint/node_modules/.bin/eslint app test/electron forge.config.ts vite.main.config.ts vite.preload.config.ts vite.renderer.config.ts vitest.config.ts --config tools/eslint/eslint.config.mjs --max-warnings=0",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "format": "prettier --write app test/electron forge.config.ts vite.*.config.ts vitest.config.ts tools/eslint package.json pnpm-workspace.yaml",
+    "format:check": "prettier --check app test/electron forge.config.ts vite.*.config.ts vitest.config.ts tools/eslint package.json pnpm-workspace.yaml",
+    "test": "pnpm run test:project && pnpm run test:native && pnpm run test:unit && pnpm run test:companion",
+    "test:project": "node --test test/project/*.test.mjs",
+    "test:native": "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native && ctest --test-dir build/native --output-on-failure",
+    "test:unit": "vitest run",
+    "test:protocol": "vitest run test/electron/protocol.test.ts",
+    "test:companion": "python -m pytest test/companion/companion_process_test.py -q",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "echarts": "6.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-vite": "7.11.2",
+    "@electron/fuses": "2.1.3",
+    "@playwright/test": "1.62.0",
+    "@testing-library/react": "16.3.2",
     "@types/node": "24.13.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
     "ajv": "8.17.1",
+    "electron": "43.2.0",
+    "jsdom": "29.1.1",
     "pnpm": "11.17.0",
     "prettier": "3.9.6",
     "typescript": "7.0.2",
+    "vite": "8.1.5",
     "vitest": "4.1.10"
   }
 }

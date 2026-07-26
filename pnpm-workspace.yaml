@@ -1,1 +1,15 @@
-packages: []
+packages:
+  - tools/eslint
+
+hoistPattern:
+  - "*"
+
+overrides:
+  "@electron/node-gyp": 10.2.0-electron.2
+
+onlyBuiltDependencies:
+  - electron
+
+peerDependencyRules:
+  allowedVersions:
+    "@electron/fuses": 2.1.3

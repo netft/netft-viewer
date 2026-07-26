@@ -6,9 +6,17 @@ node_modules/
 npm-debug.log*
 pnpm-debug.log*
 
+# Electron and Vite build artifacts
+.vite/
+out/
+
 # Native and Pixi build artifacts
 build/
 .pixi/
+
+# Python caches
+__pycache__/
+*.py[cod]
 
 # Test and tool output
 coverage/
