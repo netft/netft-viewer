@@ -12,6 +12,39 @@ const MAXIMUM_SCAN_FILES = 4096;
 const MAXIMUM_SCAN_FILE_BYTES = 256 * 1024 * 1024;
 const MAXIMUM_SCAN_TOTAL_BYTES = 1024 * 1024 * 1024;
 
+export const distributedNoticeFiles = Object.freeze([
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "LICENSES/curl.txt",
+  "LICENSES/echarts-notice.txt",
+  "LICENSES/echarts.txt",
+  "LICENSES/electron.txt",
+  "LICENSES/nlohmann-json.txt",
+  "LICENSES/react.txt",
+  "LICENSES/scheduler.txt",
+  "LICENSES/tslib.txt",
+  "LICENSES/zod.txt",
+  "LICENSES/zrender.txt",
+]);
+
+export const verifyDistributedNotices = async (resources) => {
+  for (const relativePath of distributedNoticeFiles) {
+    const candidate = join(resources, relativePath);
+    const metadata = await lstat(candidate);
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isFile() ||
+      metadata.size === 0 ||
+      (await realpath(candidate)) !== resolve(candidate) ||
+      !(await readFile(candidate)).equals(await readFile(relativePath))
+    ) {
+      throw new Error(
+        "distributed legal resource must match the repository notice",
+      );
+    }
+  }
+};
+
 export const readApplicationIdentity = async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const snapshotDocument = await readFile("CORE_SNAPSHOT.md", "utf8");
@@ -134,6 +167,7 @@ export const verifyPackageLayout = async ({
   const layout = resolvePackageLayout(packageDirectory, platform, architecture);
   const archive = join(layout.resources, "app.asar");
   const archiveFiles = listPackage(archive);
+  await verifyDistributedNotices(layout.resources);
   const companionMetadata = await lstat(layout.companion);
   if (
     companionMetadata.isSymbolicLink() ||

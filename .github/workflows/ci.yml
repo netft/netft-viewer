@@ -45,7 +45,7 @@ jobs:
         name: Check formatting
         run: |
           pnpm format:check
-          find core/viewer core/companion test/core test/companion \
+          find core/viewer core/companion test/core test/companion test/hardware \
             -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 |
             xargs --null clang-format --dry-run --Werror
       - id: lint

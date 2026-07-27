@@ -31,5 +31,5 @@ native-configure = "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMA
 native-build = "cmake --build build/native"
 native-test = "ctest --test-dir build/native --output-on-failure"
 companion-test = "python -m pytest test/companion/companion_process_test.py -q"
-format-check = "pnpm exec prettier --check app protocol test tools && clang-format --dry-run --Werror $(find core/viewer core/companion test/core test/companion -type f \\( -name '*.cpp' -o -name '*.hpp' \\))"
+format-check = "pnpm exec prettier --check app protocol test tools && clang-format --dry-run --Werror $(find core/viewer core/companion test/core test/companion test/hardware -type f \\( -name '*.cpp' -o -name '*.hpp' \\))"
 tidy = "run-clang-tidy -p build/native"

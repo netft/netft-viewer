@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  packages:
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: read
+    secrets: inherit
+
+  prepare:
+    name: Prepare verified release
+    needs: packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - id: download-linux
+        uses: actions/download-artifact@v8
+        with:
+          path: release-input
+          pattern: netft-viewer-linux-*
+      - id: download-windows
+        uses: actions/download-artifact@v8
+        with:
+          path: release-input
+          name: netft-viewer-windows-x64
+      - id: download-macos-unsigned
+        if: vars.MACOS_SIGNING_ENABLED != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          path: release-input
+          name: netft-viewer-macos-universal
+      - id: download-macos-signed
+        if: vars.MACOS_SIGNING_ENABLED == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          path: release-input
+          name: netft-viewer-macos-universal-signed
+      - id: versions
+        name: Verify release versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node tools/check-versions.mjs
+          node tools/release-notes.mjs "${RELEASE_TAG#v}" release-notes.md
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      - id: collect
+        name: Collect package assets
+        run: |
+          mkdir release-assets
+          while IFS= read -r -d '' source; do
+            name="$(basename "$source")"
+            if [[ -e "release-assets/$name" ]]; then
+              echo "::error::duplicate release asset name: $name" >&2
+              exit 1
+            fi
+            cp -- "$source" "release-assets/$name"
+          done < <(find release-input -type f -print0 | sort -z)
+      - id: sbom
+        name: Generate release SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          path: release-assets
+          format: spdx-json
+          output-file: netft-viewer-${{ steps.versions.outputs.version }}.spdx.json
+          artifact-name: netft-viewer-${{ steps.versions.outputs.version }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+          syft-version: v1.44.0
+      - id: include-sbom
+        name: Include SBOM in release assets
+        run: mv -- "netft-viewer-${{ steps.versions.outputs.version }}.spdx.json" release-assets/
+      - id: checksums
+        name: Generate SHA-256 manifest
+        working-directory: release-assets
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' |
+            LC_ALL=C sort |
+            xargs -r sha256sum -- > SHA256SUMS
+      - id: verify
+        name: Verify collected bytes and checksums
+        run: |
+          while IFS= read -r -d '' source; do
+            cmp -- "$source" "release-assets/$(basename "$source")"
+          done < <(find release-input -type f -print0 | sort -z)
+          (cd release-assets && sha256sum --check SHA256SUMS)
+      - id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: netft-viewer-release-bundle
+          path: |
+            release-assets
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    name: Stage verified draft
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: download
+        uses: actions/download-artifact@v8
+        with:
+          name: netft-viewer-release-bundle
+          path: release-bundle
+      - id: stage
+        name: Stage and byte-verify draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/publish_release.sh stage \
+            "${{ github.ref_name }}" \
+            release-bundle/release-assets \
+            release-bundle/release-notes.md
+
+  publish:
+    name: Publish approved release
+    needs: draft
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: download
+        uses: actions/download-artifact@v8
+        with:
+          name: netft-viewer-release-bundle
+          path: release-bundle
+      - id: publish
+        name: Reverify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/publish_release.sh publish \
+            "${{ github.ref_name }}" \
+            release-bundle/release-assets \
+            release-bundle/release-notes.md

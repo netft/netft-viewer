@@ -15,6 +15,11 @@ const forgeArchitecture =
   process.env.NETFT_VIEWER_FORGE_ARCHITECTURE ?? process.arch;
 const icon = resolve("packaging/icons/netft-viewer");
 const entitlements = resolve("packaging/entitlements.mac.plist");
+const legalResources = [
+  resolve("LICENSE"),
+  resolve("THIRD_PARTY_NOTICES.md"),
+  resolve("LICENSES"),
+];
 const macSigningIdentity = process.env.NETFT_VIEWER_MACOS_SIGN_IDENTITY;
 const macSigningEnabled =
   macSigningIdentity !== undefined && macSigningIdentity.length > 0;
@@ -63,7 +68,7 @@ const config = {
     ...(notarizationEnabled ? { osxNotarize: macNotarization() } : {}),
     ...(e2eBuild
       ? {
-          extraResource: ["test/support/fake-companion.mjs"],
+          extraResource: ["test/support/fake-companion.mjs", ...legalResources],
         }
       : {
           extraResource: [
@@ -74,6 +79,7 @@ const config = {
               `${forgePlatform}-${forgeArchitecture}`,
               "companion",
             ),
+            ...legalResources,
           ],
         }),
   },

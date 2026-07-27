@@ -172,6 +172,29 @@ const runNodeTool = (arguments_, options = {}) =>
     ...options,
   });
 
+test("distributed legal resources are regular, complete, and byte-identical", async (context) => {
+  const { distributedNoticeFiles, verifyDistributedNotices } =
+    await import("../../tools/lib/package-layout.mjs");
+  const temporary = await mkdtemp(join(tmpdir(), "netft-viewer-notices-"));
+  context.after(() => rm(temporary, { force: true, recursive: true }));
+
+  for (const relativePath of distributedNoticeFiles) {
+    const target = join(temporary, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, await readFile(relativePath));
+  }
+  await verifyDistributedNotices(temporary);
+
+  await writeFile(join(temporary, distributedNoticeFiles[0]), "different\n");
+  await assert.rejects(verifyDistributedNotices(temporary));
+  await writeFile(
+    join(temporary, distributedNoticeFiles[0]),
+    await readFile(distributedNoticeFiles[0]),
+  );
+  await rm(join(temporary, distributedNoticeFiles.at(-1)));
+  await assert.rejects(verifyDistributedNotices(temporary));
+});
+
 test(
   "packaged application keeps the executable companion outside asar and the renderer inside",
   packageTestOptions,

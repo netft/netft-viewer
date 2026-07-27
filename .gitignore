@@ -1,6 +1,9 @@
 # Git worktrees
 .worktrees/
 
+# Local design and agent workspaces
+.superpowers/
+
 # JavaScript dependencies and logs
 node_modules/
 npm-debug.log*

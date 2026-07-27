@@ -18,3 +18,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 add_subdirectory(core)
+
+option(
+  NETFT_VIEWER_BUILD_HARDWARE_TEST
+  "Build the opt-in physical sensor verification executable"
+  OFF
+)
+if(NETFT_VIEWER_BUILD_HARDWARE_TEST)
+  add_subdirectory(test/hardware)
+endif()
