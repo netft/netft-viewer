@@ -39,7 +39,7 @@ sudo apt install ./netft-viewer_0.1.0_amd64.deb
 
 Alternatively, extract the portable archive and run `netft-viewer`. On Windows, run `NetFTViewerSetup.exe` or extract the ZIP. On macOS, open the DMG and drag Net F/T Viewer to Applications, or extract the universal ZIP.
 
-To build from source, install Node.js 24, pnpm 11.17.0, CMake 3.21 or newer, Ninja, a C++17 compiler, and the platform packaging tools listed in [CONTRIBUTING.md](CONTRIBUTING.md):
+To build from source, first [install Pixi](https://pixi.prefix.dev/latest/installation/). The checked-in Pixi environment provides Node.js 24, pnpm 11.17.0, CMake, Ninja, and the C++ toolchain used below. Platform packaging has additional requirements listed in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 pixi install
