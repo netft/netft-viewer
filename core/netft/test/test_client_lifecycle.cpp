@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -42,7 +43,8 @@ netft::Config config_for(const netft::test::FakeSensor &sensor) {
 }
 
 template <typename Predicate>
-bool wait_until(Predicate predicate, const std::chrono::milliseconds timeout = 1s) {
+bool wait_until(Predicate predicate,
+                const std::chrono::milliseconds timeout = 1s) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   do {
     if (predicate()) {
@@ -93,13 +95,17 @@ struct ClientLifecycleTestAccess {
     return client.impl_->worker_.joinable();
   }
 
-  static bool worker_exited(const netft::Client &client) { return client.impl_->worker_exited_; }
+  static bool worker_exited(const netft::Client &client) {
+    return client.impl_->worker_exited_;
+  }
 
   static bool has_callback(const netft::Client &client) {
     return static_cast<bool>(client.impl_->callback_);
   }
 
-  static bool stopping(const netft::Client &client) { return client.impl_->stopping_; }
+  static bool stopping(const netft::Client &client) {
+    return client.impl_->stopping_;
+  }
 
   static std::uint64_t generation(const netft::Client &client) {
     std::lock_guard<std::mutex> data_lock(client.impl_->data_mutex_);
@@ -111,7 +117,8 @@ struct ClientLifecycleTestAccess {
     client.impl_->fault_published_test_hook_ = &on_fault_published;
   }
 
-  static bool wait_for_fault_publication(const std::chrono::milliseconds timeout = 1s) {
+  static bool
+  wait_for_fault_publication(const std::chrono::milliseconds timeout = 1s) {
     return wait_for_gate(fault_gate, timeout);
   }
 
@@ -122,7 +129,8 @@ struct ClientLifecycleTestAccess {
     client.impl_->wait_wake_test_hook_ = &on_wait_wake;
   }
 
-  static bool wait_for_waiter_wake(const std::chrono::milliseconds timeout = 1s) {
+  static bool
+  wait_for_waiter_wake(const std::chrono::milliseconds timeout = 1s) {
     return wait_for_gate(waiter_gate, timeout);
   }
 
@@ -131,8 +139,9 @@ struct ClientLifecycleTestAccess {
 private:
   static std::thread create_thread(netft::Client::Impl *impl) {
     if (fail_next.exchange(false)) {
-      throw std::system_error{std::make_error_code(std::errc::resource_unavailable_try_again),
-                              "injected thread creation failure"};
+      throw std::system_error{
+          std::make_error_code(std::errc::resource_unavailable_try_again),
+          "injected thread creation failure"};
     }
     return std::thread{&netft::Client::Impl::run, impl};
   }
@@ -143,7 +152,8 @@ private:
     gate.released = false;
   }
 
-  static bool wait_for_gate(HookGate &gate, const std::chrono::milliseconds timeout) {
+  static bool wait_for_gate(HookGate &gate,
+                            const std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(gate.mutex);
     return gate.cv.wait_for(lock, timeout, [&] { return gate.entered; });
   }
@@ -161,12 +171,15 @@ private:
       std::unique_lock<std::mutex> lock(gate.mutex);
       gate.entered = true;
       gate.cv.notify_all();
-      static_cast<void>(gate.cv.wait_for(lock, 2s, [&] { return gate.released; }));
+      static_cast<void>(
+          gate.cv.wait_for(lock, 2s, [&] { return gate.released; }));
     } catch (...) {
     }
   }
 
-  static void on_fault_published(netft::Client::Impl *) noexcept { enter_gate(fault_gate); }
+  static void on_fault_published(netft::Client::Impl *) noexcept {
+    enter_gate(fault_gate);
+  }
 
   static void on_wait_wake(netft::Client::Impl *, std::uint64_t) noexcept {
     enter_gate(waiter_gate);
@@ -197,8 +210,10 @@ TEST(ClientLifecycle, RateLimitDropsIntermediateSamplesWithoutQueueing) {
   EXPECT_GT(health.received_count, health.delivered_count);
   EXPECT_GT(health.rate_limited_count, 0U);
   EXPECT_EQ(health.delivered_count, delivered.load());
-  EXPECT_EQ(health.received_count, health.delivered_count + health.rate_limited_count);
-  EXPECT_DOUBLE_EQ(health.delivery_rate_hz, static_cast<double>(health.delivered_count));
+  EXPECT_EQ(health.received_count,
+            health.delivered_count + health.rate_limited_count);
+  EXPECT_DOUBLE_EQ(health.delivery_rate_hz,
+                   static_cast<double>(health.delivered_count));
 }
 
 TEST(ClientLifecycle, CallbackExceptionsContinueUnderReconnectPolicy) {
@@ -210,7 +225,8 @@ TEST(ClientLifecycle, CallbackExceptionsContinueUnderReconnectPolicy) {
     throw std::runtime_error{"consumer failed"};
   });
 
-  ASSERT_TRUE(wait_until([&] { return client.health().callback_error_count >= 3; }));
+  ASSERT_TRUE(
+      wait_until([&] { return client.health().callback_error_count >= 3; }));
   EXPECT_FALSE(client.faulted());
   EXPECT_GE(calls.load(), 3U);
   EXPECT_EQ(client.health().delivered_count, 0U);
@@ -228,7 +244,8 @@ TEST(ClientLifecycle, CallbackCopyExceptionsContinueUnderReconnectPolicy) {
 
   state->throw_on_copy = true;
   sensor.resume();
-  ASSERT_TRUE(wait_until([&] { return client.health().callback_error_count >= 3; }));
+  ASSERT_TRUE(
+      wait_until([&] { return client.health().callback_error_count >= 3; }));
   EXPECT_EQ(state->calls.load(), 0U);
   EXPECT_FALSE(client.faulted());
 
@@ -291,7 +308,9 @@ TEST(ClientLifecycle, EarlierSeriousStatusWinsOverCallbackFailure) {
   config.recovery_policy = netft::RecoveryPolicy::FailStop;
   config.deliver_samples_with_error_status = true;
   netft::Client client{config};
-  client.start([](const netft::Sample &) { throw std::runtime_error{"serious callback failed"}; });
+  client.start([](const netft::Sample &) {
+    throw std::runtime_error{"serious callback failed"};
+  });
   sensor.queue_record(1, 0x80020000U, 100);
   sensor.resume();
 
@@ -338,7 +357,8 @@ TEST(ClientLifecycle, BiasRequiresStreamingAndRestartsRealtime) {
   ASSERT_TRUE(client.wait_for_first_sample(500ms));
   EXPECT_NO_THROW(client.bias());
   EXPECT_TRUE(sensor.wait_for_command(netft::detail::Command::SetSoftwareBias));
-  EXPECT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
+  EXPECT_TRUE(
+      sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
   client.stop();
 }
 
@@ -351,7 +371,8 @@ TEST(ClientLifecycle, CallbackCanReenterBias) {
     client.bias();
   });
 
-  ASSERT_TRUE(wait_until([&] { return calls.load() >= 2 && sensor.commands().size() >= 5; }));
+  ASSERT_TRUE(wait_until(
+      [&] { return calls.load() >= 2 && sensor.commands().size() >= 5; }));
   client.stop();
 }
 
@@ -374,7 +395,8 @@ TEST(ClientLifecycle, CallbackStopReturnsAndExternalStopReapsWorker) {
   });
 
   ASSERT_TRUE(wait_until([&] { return returned.load(); }));
-  ASSERT_TRUE(wait_until([&] { return ClientLifecycleTestAccess::worker_exited(client); }));
+  ASSERT_TRUE(wait_until(
+      [&] { return ClientLifecycleTestAccess::worker_exited(client); }));
   EXPECT_TRUE(ClientLifecycleTestAccess::worker_joinable(client));
   client.stop();
   EXPECT_FALSE(ClientLifecycleTestAccess::worker_joinable(client));
@@ -421,14 +443,17 @@ TEST(ClientLifecycle, CallbackStoppedWorkerCanBeReapedByDirectRestart) {
     stopped = true;
   });
   ASSERT_TRUE(wait_until([&] { return stopped.load(); }));
-  ASSERT_TRUE(wait_until([&] { return client.health().state == netft::ClientState::Stopped; }));
-  ASSERT_TRUE(wait_until([&] { return ClientLifecycleTestAccess::worker_exited(client); }));
+  ASSERT_TRUE(wait_until(
+      [&] { return client.health().state == netft::ClientState::Stopped; }));
+  ASSERT_TRUE(wait_until(
+      [&] { return ClientLifecycleTestAccess::worker_exited(client); }));
   EXPECT_TRUE(ClientLifecycleTestAccess::worker_joinable(client));
   const auto stopped_generation = ClientLifecycleTestAccess::generation(client);
 
   std::atomic<unsigned> restarted{};
   client.start([&](const netft::Sample &) { ++restarted; });
-  EXPECT_EQ(ClientLifecycleTestAccess::generation(client), stopped_generation + 1);
+  EXPECT_EQ(ClientLifecycleTestAccess::generation(client),
+            stopped_generation + 1);
   ASSERT_TRUE(wait_until([&] { return restarted.load() > 0; }));
   client.stop();
   EXPECT_FALSE(ClientLifecycleTestAccess::worker_joinable(client));
@@ -471,12 +496,15 @@ TEST(ClientLifecycle, FaultedWorkerCanBeDirectlyRestartedBeforeItExits) {
   restarter.join();
   EXPECT_EQ(restart_error, nullptr);
   EXPECT_TRUE(restart_returned.load());
-  EXPECT_EQ(ClientLifecycleTestAccess::generation(client), faulted_generation + 1);
+  EXPECT_EQ(ClientLifecycleTestAccess::generation(client),
+            faulted_generation + 1);
   EXPECT_FALSE(client.faulted());
 
-  ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
+  ASSERT_TRUE(
+      sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
   sensor.send_record_now(1, 0, 104);
-  EXPECT_TRUE(wait_until([&] { return restarted_deliveries.load() == 1; }, 500ms));
+  EXPECT_TRUE(
+      wait_until([&] { return restarted_deliveries.load() == 1; }, 500ms));
   client.stop();
 }
 
@@ -493,7 +521,8 @@ TEST(ClientLifecycle, RestartClearsActiveStateAndPreservesLifetimeHealth) {
   ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime));
   sensor.send_record_now(17, 0x80020000U, 100);
   ASSERT_TRUE(wait_until([&] { return client.faulted(); }));
-  ASSERT_TRUE(wait_until([&] { return ClientLifecycleTestAccess::worker_exited(client); }));
+  ASSERT_TRUE(wait_until(
+      [&] { return ClientLifecycleTestAccess::worker_exited(client); }));
   client.stop();
 
   const auto before_restart = client.health();
@@ -521,17 +550,21 @@ TEST(ClientLifecycle, RestartClearsActiveStateAndPreservesLifetimeHealth) {
   EXPECT_EQ(starting.device_error_count, before_restart.device_error_count);
 
   ASSERT_TRUE(sensor.wait_for_http_request(2));
-  ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
+  ASSERT_TRUE(
+      sensor.wait_for_command(netft::detail::Command::StartRealtime, 2));
   const auto rediscovered = client.health();
   ASSERT_TRUE(rediscovered.sensor_configuration);
   EXPECT_EQ(rediscovered.sensor_configuration->revision, 2U);
-  EXPECT_EQ(rediscovered.calibration_change_count, before_restart.calibration_change_count + 1);
+  EXPECT_EQ(rediscovered.calibration_change_count,
+            before_restart.calibration_change_count + 1);
   EXPECT_EQ(rediscovered.received_count, before_restart.received_count);
   EXPECT_EQ(rediscovered.delivered_count, before_restart.delivered_count);
 
   sensor.send_record_now(1, 0, 104);
-  ASSERT_TRUE(wait_until(
-      [&] { return client.health().delivered_count == before_restart.delivered_count + 1; }));
+  ASSERT_TRUE(wait_until([&] {
+    return client.health().delivered_count ==
+           before_restart.delivered_count + 1;
+  }));
   const auto after_restart = client.health();
   const auto latest = client.latest_sample();
   ASSERT_TRUE(latest);
@@ -539,7 +572,8 @@ TEST(ClientLifecycle, RestartClearsActiveStateAndPreservesLifetimeHealth) {
   EXPECT_EQ(latest->torque_unit, netft::TorqueUnit::NewtonMillimeter);
   EXPECT_EQ(after_restart.received_count, before_restart.received_count + 1);
   EXPECT_EQ(after_restart.delivered_count, before_restart.delivered_count + 1);
-  EXPECT_EQ(after_restart.device_error_count, before_restart.device_error_count);
+  EXPECT_EQ(after_restart.device_error_count,
+            before_restart.device_error_count);
   client.stop();
 }
 
@@ -578,7 +612,8 @@ TEST(ClientLifecycle, ThreadCreationFailureRestoresPriorFaultedState) {
   sensor.queue_record(17, 0x80020000U, 100);
   sensor.resume();
   ASSERT_TRUE(wait_until([&] { return client.faulted(); }));
-  ASSERT_TRUE(wait_until([&] { return ClientLifecycleTestAccess::worker_exited(client); }));
+  ASSERT_TRUE(wait_until(
+      [&] { return ClientLifecycleTestAccess::worker_exited(client); }));
 
   const auto prior_health = client.health();
   const auto prior_latest = client.latest_sample();
@@ -601,7 +636,8 @@ TEST(ClientLifecycle, ThreadCreationFailureRestoresPriorFaultedState) {
   EXPECT_EQ(restored_health.last_error, prior_health.last_error);
   EXPECT_EQ(restored_health.received_count, prior_health.received_count);
   EXPECT_EQ(restored_health.delivered_count, prior_health.delivered_count);
-  EXPECT_EQ(restored_health.device_error_count, prior_health.device_error_count);
+  EXPECT_EQ(restored_health.device_error_count,
+            prior_health.device_error_count);
   EXPECT_EQ(restored_health.delivery_rate_hz, prior_health.delivery_rate_hz);
   EXPECT_EQ(restored_latest->rdt_sequence, prior_latest->rdt_sequence);
   EXPECT_EQ(restored_latest->ft_sequence, prior_latest->ft_sequence);
@@ -692,7 +728,9 @@ TEST(ClientLifecycle, WaitForFirstSampleRequiresSuccessfulDelivery) {
   auto config = config_for(sensor);
   config.recovery_policy = netft::RecoveryPolicy::FailStop;
   netft::Client client{config};
-  client.start([](const netft::Sample &) { throw std::runtime_error{"delivery failed"}; });
+  client.start([](const netft::Sample &) {
+    throw std::runtime_error{"delivery failed"};
+  });
   sensor.queue_record(1, 0, 100);
   sensor.resume();
 
@@ -708,6 +746,24 @@ TEST(ClientLifecycle, DestructionSendsStopStreaming) {
     client.start([](const netft::Sample &) {});
     ASSERT_TRUE(wait_until([&] { return client.health().received_count > 0; }));
   }
+  EXPECT_TRUE(sensor.wait_for_command(netft::detail::Command::StopStreaming));
+}
+
+TEST(ClientLifecycle, DestructionFromCallbackIsDeferredUntilWorkerExit) {
+  netft::test::FakeSensor sensor;
+  sensor.pause();
+  auto *client = new netft::Client{config_for(sensor)};
+  std::promise<void> destruction_returned;
+  auto returned = destruction_returned.get_future();
+
+  client->start([client, &destruction_returned](const netft::Sample &) {
+    delete client;
+    destruction_returned.set_value();
+  });
+  ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime));
+  sensor.send_record_now(1U, 0U, 100U);
+
+  ASSERT_EQ(returned.wait_for(1s), std::future_status::ready);
   EXPECT_TRUE(sensor.wait_for_command(netft::detail::Command::StopStreaming));
 }
 

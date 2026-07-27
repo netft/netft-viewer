@@ -24,6 +24,7 @@ public:
 
   void start(SampleCallback callback);
   void stop() noexcept;
+  [[nodiscard]] bool called_from_worker_thread() const noexcept;
   void bias();
   bool wait_for_first_sample(std::chrono::duration<double> timeout);
   bool faulted() const noexcept;
@@ -57,8 +58,9 @@ private:
   SessionOutcome receive_session();
   SensorConfiguration configuration_for_session();
   void apply_configuration(SensorConfiguration configuration);
-  std::optional<SessionResult> handle_record(const detail::RawRecord &record,
-                                             std::chrono::steady_clock::time_point received_at);
+  std::optional<SessionResult>
+  handle_record(const detail::RawRecord &record,
+                std::chrono::steady_clock::time_point received_at);
   void close_session() noexcept;
   void set_fault(FaultCode code, std::string message) noexcept;
   void record_callback_error(const char *message) noexcept;
