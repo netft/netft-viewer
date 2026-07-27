@@ -1,8 +1,29 @@
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+
+const filesystemHooks = vi.hoisted(() => ({
+  afterOpen: undefined as ((path: string) => Promise<void> | void) | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: async (...arguments_: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...arguments_);
+      try {
+        await filesystemHooks.afterOpen?.(String(arguments_[0]));
+        return handle;
+      } catch (error) {
+        await handle.close();
+        throw error;
+      }
+    },
+  };
+});
 
 vi.mock("electron", () => ({
   contextBridge: {
@@ -18,10 +39,12 @@ vi.mock("electron", () => ({
 import forgeConfig from "../../forge.config";
 import {
   bindApplicationLifecycle,
+  buildRendererAssetSnapshot,
   CONTENT_SECURITY_POLICY,
   createViewerWindow,
   installRendererProtocol,
   installSessionSecurity,
+  MAXIMUM_RENDERER_ASSET_BYTES,
   registerRendererScheme,
   resolveCompanionExecutable,
   resolveRendererAssetUrl,
@@ -264,9 +287,7 @@ describe("Electron window security", () => {
     await writeFile(join(root, "asset.js"), "export {};", "utf8");
     await writeFile(join(root, "data.json"), "{}", "utf8");
     await writeFile(join(outside, "outside.js"), "export const escaped = 1;");
-    await symlink(join(outside, "outside.js"), join(root, "link.js"));
-    await symlink(join(outside, "missing.js"), join(root, "broken.js"));
-    await mkdir(join(root, "directory.js"));
+    const snapshot = await buildRendererAssetSnapshot(root);
     let handler: ((request: Request) => Promise<Response>) | undefined;
     installRendererProtocol(
       {
@@ -274,7 +295,7 @@ describe("Electron window security", () => {
           handler = registered;
         }),
       },
-      root,
+      snapshot,
     );
 
     const index = await handler?.(new Request("netft-viewer://app/index.html"));
@@ -286,15 +307,80 @@ describe("Electron window security", () => {
       "netft-viewer://foreign/index.html",
       "netft-viewer://app/data.json",
       "netft-viewer://app/%2e%2e%2foutside.js",
-      "netft-viewer://app/link.js",
-      "netft-viewer://app/broken.js",
-      "netft-viewer://app/directory.js",
       "netft-viewer://app/missing.js",
     ]) {
       expect((await handler?.(new Request(url)))?.status).toBe(404);
     }
+
+    await unlink(join(root, "asset.js"));
+    await symlink(join(outside, "outside.js"), join(root, "asset.js"));
+    const snapshotted = await handler?.(
+      new Request("netft-viewer://app/asset.js"),
+    );
+    expect(snapshotted?.status).toBe(200);
+    expect(await snapshotted?.text()).toBe("export {};");
+
     await rm(root, { force: true, recursive: true });
     await rm(outside, { force: true, recursive: true });
+  });
+
+  it("rejects symlinked and broken renderer assets during snapshot", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "netft-renderer-outside-"));
+    await writeFile(join(outside, "outside.js"), "export {};");
+    for (const target of [
+      join(outside, "outside.js"),
+      join(outside, "missing.js"),
+    ]) {
+      const root = await mkdtemp(join(tmpdir(), "netft-renderer-protocol-"));
+      await writeFile(join(root, "index.html"), "<main></main>", "utf8");
+      await symlink(target, join(root, "asset.js"));
+      await expect(buildRendererAssetSnapshot(root)).rejects.toThrow();
+      await rm(root, { force: true, recursive: true });
+    }
+    await rm(outside, { force: true, recursive: true });
+  });
+
+  it("never follows a renderer path replaced after its handle opens", async () => {
+    const root = await mkdtemp(join(tmpdir(), "netft-renderer-protocol-"));
+    const outside = await mkdtemp(join(tmpdir(), "netft-renderer-outside-"));
+    const assetPath = join(root, "asset.js");
+    await writeFile(join(root, "index.html"), "<main></main>", "utf8");
+    await writeFile(assetPath, "export const trusted = true;", "utf8");
+    await writeFile(
+      join(outside, "outside.js"),
+      "export const escaped = true;",
+      "utf8",
+    );
+    let replaced = false;
+    filesystemHooks.afterOpen = async (path) => {
+      if (path === assetPath) {
+        await unlink(assetPath);
+        await symlink(join(outside, "outside.js"), assetPath);
+        replaced = true;
+      }
+    };
+
+    try {
+      await expect(buildRendererAssetSnapshot(root)).rejects.toThrow(
+        "renderer asset changed while opening",
+      );
+      expect(replaced).toBe(true);
+    } finally {
+      filesystemHooks.afterOpen = undefined;
+      await rm(root, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a renderer asset above the fixed per-file byte limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "netft-renderer-protocol-"));
+    await writeFile(join(root, "index.html"), "<main></main>", "utf8");
+    await writeFile(
+      join(root, "oversized.js"),
+      Buffer.alloc(MAXIMUM_RENDERER_ASSET_BYTES + 1),
+    );
+    await expect(buildRendererAssetSnapshot(root)).rejects.toThrow();
+    await rm(root, { force: true, recursive: true });
   });
 });
 

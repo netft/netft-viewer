@@ -1,5 +1,21 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { constants, type Stats } from "node:fs";
+import {
+  lstat,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  type FileHandle,
+} from "node:fs/promises";
+import {
+  extname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import type {
   BrowserWindowConstructorOptions,
@@ -218,12 +234,233 @@ const RENDERER_CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
 };
+export const MAXIMUM_RENDERER_ASSET_FILES = 256;
+export const MAXIMUM_RENDERER_ASSET_BYTES = 8 * 1024 * 1024;
+export const MAXIMUM_RENDERER_SNAPSHOT_BYTES = 32 * 1024 * 1024;
+const MAXIMUM_RENDERER_DIRECTORY_ENTRIES = 512;
+
+interface RendererAsset {
+  body: Buffer;
+  contentType: string;
+}
+
+export type RendererAssetSnapshot = ReadonlyMap<string, RendererAsset>;
 
 const escapesDirectory = (relativePath: string): boolean =>
   relativePath.length === 0 ||
   relativePath === ".." ||
   relativePath.startsWith(`..${sep}`) ||
   isAbsolute(relativePath);
+
+const rendererUrlPath = (relativePath: string): string =>
+  `/${relativePath.split(sep).join("/")}`;
+
+const isSameFile = (left: Stats, right: Stats): boolean =>
+  left.dev === right.dev && left.ino === right.ino;
+
+const openWithoutFollowing = async (path: string): Promise<FileHandle> => {
+  try {
+    return await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EINVAL" && code !== "ENOTSUP") {
+      throw error;
+    }
+    // Some non-POSIX hosts do not implement O_NOFOLLOW. The same-handle
+    // identity checks below remain authoritative on those platforms.
+    return open(path, constants.O_RDONLY);
+  }
+};
+
+const openRendererAsset = async (
+  candidate: string,
+  realRoot: string,
+): Promise<{ body: Buffer; relativePath: string }> => {
+  const handle = await openWithoutFollowing(candidate);
+  try {
+    const openedMetadata = await handle.stat();
+    if (!openedMetadata.isFile()) {
+      throw new Error("renderer assets must be regular files");
+    }
+    if (openedMetadata.size > MAXIMUM_RENDERER_ASSET_BYTES) {
+      throw new Error("renderer asset byte limit exceeded");
+    }
+
+    const pathMetadata = await lstat(candidate);
+    if (
+      pathMetadata.isSymbolicLink() ||
+      !pathMetadata.isFile() ||
+      !isSameFile(openedMetadata, pathMetadata)
+    ) {
+      throw new Error("renderer asset changed while opening");
+    }
+    const openedRealPath = await realpath(candidate);
+    const relativePath = relative(realRoot, openedRealPath);
+    if (escapesDirectory(relativePath)) {
+      throw new Error("renderer asset escapes real root");
+    }
+    const realMetadata = await lstat(openedRealPath);
+    if (
+      realMetadata.isSymbolicLink() ||
+      !realMetadata.isFile() ||
+      !isSameFile(openedMetadata, realMetadata)
+    ) {
+      throw new Error("renderer asset identity mismatch");
+    }
+
+    const body = await handle.readFile();
+    if (body.byteLength > MAXIMUM_RENDERER_ASSET_BYTES) {
+      throw new Error("renderer asset byte limit exceeded");
+    }
+    return { body, relativePath };
+  } finally {
+    await handle.close();
+  }
+};
+
+type RendererAssetReader = (
+  candidate: string,
+  realCandidate: string,
+  realRoot: string,
+) => Promise<{ body: Buffer; relativePath: string }>;
+
+const readImmutableArchiveAsset: RendererAssetReader = async (
+  _candidate,
+  realCandidate,
+  realRoot,
+) => {
+  const metadata = await lstat(realCandidate);
+  if (!metadata.isFile()) {
+    throw new Error("renderer assets must be regular files");
+  }
+  if (metadata.size > MAXIMUM_RENDERER_ASSET_BYTES) {
+    throw new Error("renderer asset byte limit exceeded");
+  }
+  const relativePath = relative(realRoot, realCandidate);
+  if (escapesDirectory(relativePath)) {
+    throw new Error("renderer asset escapes real root");
+  }
+  const body = await readFile(realCandidate);
+  if (body.byteLength > MAXIMUM_RENDERER_ASSET_BYTES) {
+    throw new Error("renderer asset byte limit exceeded");
+  }
+  return { body, relativePath };
+};
+
+const buildRendererSnapshot = async (
+  rendererRoot: string,
+  readAsset: RendererAssetReader,
+): Promise<RendererAssetSnapshot> => {
+  if (!isAbsolute(rendererRoot)) {
+    throw new Error("renderer root must be absolute");
+  }
+  const trustedRoot = resolve(rendererRoot);
+  const rootMetadata = await lstat(trustedRoot);
+  if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+    throw new Error("unsafe renderer root");
+  }
+  const realRoot = await realpath(trustedRoot);
+  const assets = new Map<string, RendererAsset>();
+  let entryCount = 0;
+  let totalBytes = 0;
+
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      entryCount += 1;
+      if (entryCount > MAXIMUM_RENDERER_DIRECTORY_ENTRIES) {
+        throw new Error("renderer directory entry limit exceeded");
+      }
+      const candidate = resolve(directory, entry.name);
+      const lexicalChild = relative(trustedRoot, candidate);
+      if (escapesDirectory(lexicalChild)) {
+        throw new Error("renderer asset escapes configured root");
+      }
+      const lexicalMetadata = await lstat(candidate);
+      if (entry.isSymbolicLink() || lexicalMetadata.isSymbolicLink()) {
+        throw new Error("renderer assets must not contain symbolic links");
+      }
+      const realCandidate = await realpath(candidate);
+      const realChild = relative(realRoot, realCandidate);
+      if (escapesDirectory(realChild)) {
+        throw new Error("renderer asset escapes real root");
+      }
+      const realMetadata = await lstat(realCandidate);
+      if (realMetadata.isDirectory()) {
+        await visit(realCandidate);
+        continue;
+      }
+      if (!realMetadata.isFile()) {
+        throw new Error("renderer assets must be regular files");
+      }
+      const contentType = RENDERER_CONTENT_TYPES[extname(realCandidate)];
+      if (contentType === undefined) {
+        continue;
+      }
+      if (assets.size >= MAXIMUM_RENDERER_ASSET_FILES) {
+        throw new Error("renderer asset file limit exceeded");
+      }
+      const { body, relativePath } = await readAsset(
+        candidate,
+        realCandidate,
+        realRoot,
+      );
+      totalBytes += body.byteLength;
+      if (totalBytes > MAXIMUM_RENDERER_SNAPSHOT_BYTES) {
+        throw new Error("renderer snapshot byte limit exceeded");
+      }
+      assets.set(rendererUrlPath(relativePath), {
+        body: Buffer.from(body),
+        contentType,
+      });
+    }
+  };
+
+  await visit(realRoot);
+  if (!assets.has("/index.html")) {
+    throw new Error("renderer entry asset is missing");
+  }
+  return assets;
+};
+
+export const buildRendererAssetSnapshot = async (
+  rendererRoot: string,
+): Promise<RendererAssetSnapshot> =>
+  buildRendererSnapshot(rendererRoot, async (candidate, _realCandidate, root) =>
+    openRendererAsset(candidate, root),
+  );
+
+const buildPackagedRendererAssetSnapshot = async (
+  applicationArchive: string,
+  rendererRoot: string,
+): Promise<RendererAssetSnapshot> => {
+  const archive = resolve(applicationArchive);
+  const root = resolve(rendererRoot);
+  if (
+    extname(archive) !== ".asar" ||
+    escapesDirectory(relative(archive, root))
+  ) {
+    throw new Error("packaged renderer must reside in the application ASAR");
+  }
+  // Electron's ASAR entries have virtual metadata that cannot be matched to a
+  // FileHandle inode. This path is restricted to the immutable application
+  // archive; Forge also enables ASAR integrity and OnlyLoadAppFromAsar fuses.
+  return buildRendererSnapshot(root, readImmutableArchiveAsset);
+};
+
+const canonicalRendererRequestPath = (url: URL): string | undefined => {
+  const pathname = decodeURIComponent(url.pathname);
+  if (
+    pathname.includes("\0") ||
+    pathname.includes("\\") ||
+    !pathname.startsWith("/") ||
+    posix.normalize(pathname) !== pathname
+  ) {
+    return undefined;
+  }
+  return pathname;
+};
 
 export interface RendererProtocol {
   handle(
@@ -261,13 +498,15 @@ export const registerRendererScheme = (
 
 export const installRendererProtocol = (
   protocol: Pick<RendererProtocol, "handle">,
-  rendererRoot: string,
+  snapshot: RendererAssetSnapshot,
 ): void => {
-  if (!isAbsolute(rendererRoot)) {
-    throw new Error("renderer root must be absolute");
+  const assets = new Map<string, RendererAsset>();
+  for (const [path, asset] of snapshot) {
+    assets.set(path, {
+      body: Buffer.from(asset.body),
+      contentType: asset.contentType,
+    });
   }
-  const trustedRoot = resolve(rendererRoot);
-  const realRootPromise = realpath(trustedRoot);
   protocol.handle(RENDERER_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
@@ -282,30 +521,17 @@ export const installRendererProtocol = (
       ) {
         return new Response(null, { status: 404 });
       }
-      const pathname = decodeURIComponent(url.pathname);
-      if (pathname.includes("\0")) {
+      const pathname = canonicalRendererRequestPath(url);
+      if (pathname === undefined) {
         return new Response(null, { status: 404 });
       }
-      const realRoot = await realRootPromise;
-      const candidate = resolve(trustedRoot, `.${pathname}`);
-      const lexicalChild = relative(trustedRoot, candidate);
-      if (escapesDirectory(lexicalChild)) {
+      const asset = assets.get(pathname);
+      if (asset === undefined) {
         return new Response(null, { status: 404 });
       }
-      const realCandidate = await realpath(candidate);
-      const realChild = relative(realRoot, realCandidate);
-      const metadata = await lstat(realCandidate);
-      const contentType = RENDERER_CONTENT_TYPES[extname(realCandidate)];
-      if (
-        escapesDirectory(realChild) ||
-        !metadata.isFile() ||
-        contentType === undefined
-      ) {
-        return new Response(null, { status: 404 });
-      }
-      return new Response(await readFile(realCandidate), {
+      return new Response(Buffer.from(asset.body), {
         headers: {
-          "Content-Type": contentType,
+          "Content-Type": asset.contentType,
           "X-Content-Type-Options": "nosniff",
         },
       });
@@ -411,7 +637,10 @@ const boot = async (): Promise<void> => {
   if (developmentRendererUrl === undefined) {
     installRendererProtocol(
       protocol,
-      join(app.getAppPath(), ".vite", "renderer", MAIN_WINDOW_VITE_NAME),
+      await buildPackagedRendererAssetSnapshot(
+        app.getAppPath(),
+        join(app.getAppPath(), ".vite", "renderer", MAIN_WINDOW_VITE_NAME),
+      ),
     );
   }
   const rendererUrl = developmentRendererUrl ?? resolveRendererAssetUrl();
