@@ -83,4 +83,15 @@ if(BUILD_TESTING)
     ${_netft_viewer_gtest_main}
   )
   add_test(NAME ViewerSession COMMAND netft_viewer_session)
+
+  add_executable(netft_viewer_hardware_authorization
+    ${PROJECT_SOURCE_DIR}/test/core/test_hardware_authorization.cpp
+  )
+  target_include_directories(netft_viewer_hardware_authorization PRIVATE
+    ${PROJECT_SOURCE_DIR}/test/hardware
+  )
+  target_link_libraries(netft_viewer_hardware_authorization PRIVATE
+    ${_netft_viewer_gtest_main}
+  )
+  add_test(NAME HardwareAuthorization COMMAND netft_viewer_hardware_authorization)
 endif()

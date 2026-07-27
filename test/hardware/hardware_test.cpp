@@ -1,3 +1,5 @@
+#include "bias_authorization.hpp"
+
 #include "netft/discovery.hpp"
 #include "netft/types.hpp"
 #include "netft_viewer/session.hpp"
@@ -108,7 +110,8 @@ int main() {
 
   const auto host = environment("NETFT_SENSOR_HOST");
   const auto output = environment("NETFT_HARDWARE_OUTPUT");
-  const auto allow_bias = environment("NETFT_ALLOW_BIAS") == "1";
+  const auto allow_bias = netft_viewer::hardware::bias_authorized(
+      std::getenv("NETFT_ALLOW_BIAS"), std::getenv("NETFT_CONFIRM_BIAS"));
   if (!host || !output) {
     print_summary(summary, false);
     return 64;

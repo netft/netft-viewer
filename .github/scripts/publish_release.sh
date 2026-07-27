@@ -46,8 +46,13 @@ if [[ "${#assets[@]}" -eq 0 || "${#assets[@]}" -ne "${#entries[@]}" ]]; then
   echo "asset directory must contain only regular files" >&2
   exit 66
 fi
+if [[ "${#assets[@]}" -gt 64 ]]; then
+  echo "asset directory exceeds the 64-file release limit" >&2
+  exit 66
+fi
 
 declare -A local_assets=()
+total_asset_bytes=0
 for asset in "${assets[@]}"; do
   name="$(basename "$asset")"
   if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._+[:space:]-]*$ ]] ||
@@ -60,16 +65,87 @@ for asset in "${assets[@]}"; do
     exit 66
   fi
   local_assets["$name"]="$asset"
+  asset_bytes="$(stat --format='%s' -- "$asset")"
+  if ((asset_bytes > 2147483648)); then
+    echo "release asset exceeds the 2 GiB per-file limit" >&2
+    exit 66
+  fi
+  total_asset_bytes=$((total_asset_bytes + asset_bytes))
+  if ((total_asset_bytes > 8589934592)); then
+    echo "release assets exceed the 8 GiB total limit" >&2
+    exit 66
+  fi
 done
 
-release_json=""
+work_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf -- "$work_dir"
+}
+trap cleanup EXIT
+
+api_http_status=""
+api_request() {
+  local endpoint="$1"
+  local body_file="$2"
+  local allow_not_found="$3"
+  local response_file="$work_dir/api-response"
+  local error_file="$work_dir/api-error"
+  local gh_status
+  local status_line
+
+  : >"$response_file"
+  : >"$error_file"
+  set +e
+  gh api --include "$endpoint" >"$response_file" 2>"$error_file"
+  gh_status=$?
+  set -e
+
+  status_line="$(head -n 1 "$response_file")"
+  api_http_status=""
+  if [[ "$status_line" =~ ^HTTP/[0-9.]+[[:space:]]+([0-9]{3})([[:space:]]|$) ]]; then
+    api_http_status="${BASH_REMATCH[1]}"
+  fi
+  awk 'body { print } /^\r?$/ { body = 1 }' "$response_file" >"$body_file"
+
+  if [[ "$gh_status" -eq 0 && "$api_http_status" =~ ^2[0-9][0-9]$ ]]; then
+    return 0
+  fi
+  if [[ "$allow_not_found" == true && "$api_http_status" == 404 ]]; then
+    if [[ "$gh_status" -ne 0 ]]; then
+      return "$gh_status"
+    fi
+    return 1
+  fi
+
+  if [[ -s "$error_file" ]]; then
+    cat "$error_file" >&2
+  else
+    cat "$response_file" >&2
+  fi
+  if [[ "$gh_status" -ne 0 ]]; then
+    return "$gh_status"
+  fi
+  return 1
+}
+
+repository_json="$work_dir/repository.json"
+if api_request "repos/$GITHUB_REPOSITORY" "$repository_json" false; then
+  :
+else
+  request_status=$?
+  exit "$request_status"
+fi
+
+release_endpoint="repos/$GITHUB_REPOSITORY/releases/tags/$tag"
+release_file="$work_dir/release.json"
 release_exists=false
-if release_json="$(
-  gh release view "$tag" \
-    --repo "$GITHUB_REPOSITORY" \
-    --json isDraft,assets 2>/dev/null
-)"; then
+if api_request "$release_endpoint" "$release_file" true; then
   release_exists=true
+else
+  request_status=$?
+  if [[ "$api_http_status" != 404 ]]; then
+    exit "$request_status"
+  fi
 fi
 
 if [[ "$mode" == "publish" && "$release_exists" != true ]]; then
@@ -84,11 +160,36 @@ if [[ "$release_exists" != true ]]; then
     --verify-tag \
     --title "Net F/T Viewer $tag" \
     --notes-file "$notes_file"
-  release_json="$(
-    gh release view "$tag" \
-      --repo "$GITHUB_REPOSITORY" \
-      --json isDraft,assets
-  )"
+  if api_request "$release_endpoint" "$release_file" false; then
+    :
+  else
+    request_status=$?
+    exit "$request_status"
+  fi
+fi
+
+release_json="$(<"$release_file")"
+expected_title="Net F/T Viewer $tag"
+if ! printf '%s' "$release_json" |
+  node -e '
+    const fs = require("node:fs");
+    const [expectedTag, expectedTitle, notesFile] = process.argv.slice(1);
+    let input = "";
+    process.stdin.on("data", (chunk) => (input += chunk));
+    process.stdin.on("end", () => {
+      const value = JSON.parse(input);
+      const expectedBody = fs.readFileSync(notesFile, "utf8");
+      if (
+        value.tag_name !== expectedTag ||
+        value.name !== expectedTitle ||
+        value.body !== expectedBody
+      ) {
+        process.exit(2);
+      }
+    });
+  ' "$tag" "$expected_title" "$notes_file"; then
+  echo "release tag, title, or notes do not match" >&2
+  exit 65
 fi
 
 is_draft="$(
@@ -98,13 +199,15 @@ is_draft="$(
       process.stdin.on("data", (chunk) => (input += chunk));
       process.stdin.on("end", () => {
         const value = JSON.parse(input);
-        if (typeof value.isDraft !== "boolean") process.exit(2);
-        process.stdout.write(value.isDraft ? "true" : "false");
+        if (typeof value.draft !== "boolean") process.exit(2);
+        process.stdout.write(value.draft ? "true" : "false");
       });
     '
 )"
 
 read_remote_assets() {
+  # The expression below is a JavaScript template literal.
+  # shellcheck disable=SC2016
   printf '%s' "$1" |
     node -e '
       let input = "";
@@ -137,11 +240,8 @@ if [[ "$is_draft" != true && "${#remote_assets[@]}" -ne "${#local_assets[@]}" ]]
   exit 65
 fi
 
-verify_dir="$(mktemp -d)"
-cleanup() {
-  rm -rf -- "$verify_dir"
-}
-trap cleanup EXIT
+verify_dir="$work_dir/verified-assets"
+mkdir -p "$verify_dir"
 
 for name in "${!local_assets[@]}"; do
   asset="${local_assets[$name]}"
@@ -164,11 +264,13 @@ for name in "${!local_assets[@]}"; do
   fi
 done
 
-release_json="$(
-  gh release view "$tag" \
-    --repo "$GITHUB_REPOSITORY" \
-    --json isDraft,assets
-)"
+if api_request "$release_endpoint" "$release_file" false; then
+  :
+else
+  request_status=$?
+  exit "$request_status"
+fi
+release_json="$(<"$release_file")"
 mapfile -t verified_names < <(read_remote_assets "$release_json")
 if [[ "${#verified_names[@]}" -ne "${#local_assets[@]}" ]]; then
   echo "release asset set is incomplete" >&2
@@ -193,4 +295,41 @@ done
 
 if [[ "$mode" == "publish" && "$is_draft" == true ]]; then
   gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+fi
+
+if [[ "$mode" == "publish" ]]; then
+  if api_request "$release_endpoint" "$release_file" false; then
+    :
+  else
+    request_status=$?
+    exit "$request_status"
+  fi
+  release_json="$(<"$release_file")"
+  published="$(
+    printf '%s' "$release_json" |
+      node -e '
+        let input = "";
+        process.stdin.on("data", (chunk) => (input += chunk));
+        process.stdin.on("end", () => {
+          const value = JSON.parse(input);
+          if (typeof value.draft !== "boolean") process.exit(2);
+          process.stdout.write(value.draft ? "false" : "true");
+        });
+      '
+  )"
+  if [[ "$published" != true ]]; then
+    echo "release remained a draft after publication" >&2
+    exit 65
+  fi
+  mapfile -t published_names < <(read_remote_assets "$release_json")
+  if [[ "${#published_names[@]}" -ne "${#local_assets[@]}" ]]; then
+    echo "published release asset set is incomplete" >&2
+    exit 65
+  fi
+  for name in "${published_names[@]}"; do
+    if [[ -z "${local_assets[$name]:-}" ]]; then
+      echo "published release asset set does not match" >&2
+      exit 65
+    fi
+  done
 fi

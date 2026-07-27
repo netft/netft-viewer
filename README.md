@@ -42,7 +42,10 @@ Alternatively, extract the portable archive and run `netft-viewer`. On Windows, 
 To build from source, install Node.js 24, pnpm 11.17.0, CMake 3.21 or newer, Ninja, a C++17 compiler, and the platform packaging tools listed in [CONTRIBUTING.md](CONTRIBUTING.md):
 
 ```bash
+pixi install
 pnpm install --frozen-lockfile
+pixi run native-configure
+pixi run native-build
 pnpm run start
 ```
 
