@@ -85,6 +85,25 @@ struct HookGate {
   bool released{};
 };
 
+class PromiseCompletion {
+public:
+  explicit PromiseCompletion(std::promise<void> &promise) : promise_(promise) {}
+  ~PromiseCompletion() { complete(); }
+
+  void complete() noexcept {
+    if (!completed_.exchange(true)) {
+      try {
+        promise_.set_value();
+      } catch (...) {
+      }
+    }
+  }
+
+private:
+  std::promise<void> &promise_;
+  std::atomic<bool> completed_{};
+};
+
 struct ClientLifecycleTestAccess {
   static void fail_next_thread_creation(netft::Client &client) {
     fail_next = true;
@@ -765,6 +784,59 @@ TEST(ClientLifecycle, DestructionFromCallbackIsDeferredUntilWorkerExit) {
 
   ASSERT_EQ(returned.wait_for(1s), std::future_status::ready);
   EXPECT_TRUE(sensor.wait_for_command(netft::detail::Command::StopStreaming));
+}
+
+TEST(ClientLifecycle,
+     SelfDestructionStopsCallbacksBeforeWaitingForDeferredReclamation) {
+  netft::test::FakeSensor blocked_sensor;
+  netft::test::FakeSensor streaming_sensor{1'000.0};
+  blocked_sensor.pause();
+  streaming_sensor.pause();
+  std::promise<void> release_blocked_callback;
+  PromiseCompletion release_guard{release_blocked_callback};
+  const auto release = release_blocked_callback.get_future().share();
+  std::promise<void> blocked_destroyed;
+  auto blocked_returned = blocked_destroyed.get_future();
+  auto *blocked_client = new netft::Client{config_for(blocked_sensor)};
+
+  blocked_client->start(
+      [blocked_client, &blocked_destroyed, release](const netft::Sample &) {
+        delete blocked_client;
+        blocked_destroyed.set_value();
+        release.wait();
+      });
+  ASSERT_TRUE(
+      blocked_sensor.wait_for_command(netft::detail::Command::StartRealtime));
+  blocked_sensor.send_record_now(1U, 0U, 100U);
+  ASSERT_EQ(blocked_returned.wait_for(1s), std::future_status::ready);
+
+  std::atomic<unsigned> streaming_callbacks{};
+  std::promise<void> streaming_destroyed;
+  auto streaming_returned = streaming_destroyed.get_future();
+  auto *streaming_client = new netft::Client{config_for(streaming_sensor)};
+  streaming_client->start(
+      [streaming_client, &streaming_callbacks,
+       &streaming_destroyed](const netft::Sample &) {
+        if (streaming_callbacks.fetch_add(1U) == 0U) {
+          delete streaming_client;
+          streaming_destroyed.set_value();
+        }
+      });
+  ASSERT_TRUE(
+      streaming_sensor.wait_for_command(netft::detail::Command::StartRealtime));
+  streaming_sensor.resume();
+  ASSERT_EQ(streaming_returned.wait_for(1s), std::future_status::ready);
+
+  const auto callback_repeated =
+      wait_until([&] { return streaming_callbacks.load() > 1U; }, 100ms);
+  release_guard.complete();
+  EXPECT_TRUE(
+      blocked_sensor.wait_for_command(netft::detail::Command::StopStreaming));
+  EXPECT_TRUE(
+      streaming_sensor.wait_for_command(netft::detail::Command::StopStreaming));
+
+  EXPECT_FALSE(callback_repeated);
+  EXPECT_EQ(streaming_callbacks.load(), 1U);
 }
 
 } // namespace

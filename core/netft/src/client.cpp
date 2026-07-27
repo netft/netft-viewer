@@ -63,6 +63,7 @@ Client::Client(Config config)
 
 Client::~Client() {
   if (impl_ && impl_->called_from_worker_thread()) {
+    impl_->stop();
     static DeferredDestroyer<Impl> deferred;
     deferred.enqueue(std::move(impl_));
     return;
