@@ -42,7 +42,10 @@ test("dependency configuration supports CMake 3.21.3", () => {
 });
 
 test("the shipped JSON dependency uses an immutable full commit identity", () => {
-  const dependencies = readFileSync(resolve("cmake/Dependencies.cmake"), "utf8");
+  const dependencies = readFileSync(
+    resolve("cmake/Dependencies.cmake"),
+    "utf8",
+  );
   const declaration = dependencies.match(
     /FetchContent_Declare\(nlohmann_json[^)]*?GIT_REPOSITORY\s+\S+[^)]*?GIT_TAG\s+(\S+)[^)]*?\)/s,
   );
