@@ -17,6 +17,12 @@ clangxx = "*"
 clang-tools = "*"
 pkg-config = "*"
 
+[target.linux-64.dependencies]
+patchelf = "*"
+
+[target.linux-aarch64.dependencies]
+patchelf = "*"
+
 [tasks]
 native-configure = "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug"
 native-build = "cmake --build build/native"

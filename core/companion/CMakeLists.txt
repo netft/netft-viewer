@@ -14,7 +14,7 @@ target_compile_features(netft_viewer_companion_runtime PUBLIC cxx_std_17)
 target_include_directories(netft_viewer_companion_runtime PUBLIC include)
 target_compile_definitions(netft_viewer_companion_runtime PRIVATE
   NETFT_VIEWER_APP_VERSION="${PROJECT_VERSION}"
-  NETFT_VIEWER_CORE_SNAPSHOT="e424c401587052f03de9b94f76f1e86b78902105"
+  NETFT_VIEWER_CORE_SNAPSHOT="${NETFT_VIEWER_CORE_SNAPSHOT}"
 )
 target_link_libraries(netft_viewer_companion_runtime
   PUBLIC netft_viewer_companion_protocol

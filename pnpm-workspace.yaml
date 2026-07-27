@@ -9,6 +9,11 @@ overrides:
 
 onlyBuiltDependencies:
   - electron
+  - electron-winstaller
+
+allowBuilds:
+  electron: true
+  electron-winstaller: true
 
 peerDependencyRules:
   allowedVersions:
