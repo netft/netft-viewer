@@ -1,0 +1,53 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL / ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: C++
+            language: c-cpp
+            build-mode: manual
+          - label: JavaScript and TypeScript
+            language: javascript-typescript
+            build-mode: none
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: codeql-init
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - id: cpp-build
+        name: Build C++ for analysis
+        if: matrix.language == 'c-cpp'
+        run: |
+          cmake -S . -B build/codeql -G Ninja -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build/codeql --target netft-viewer-companion
+      - id: codeql-analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

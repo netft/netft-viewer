@@ -22,7 +22,7 @@ struct AxisPlotBatch {
 };
 
 struct PlotBatch {
-  std::array<AxisPlotBatch, axes.size()> axes{};
+  std::array<AxisPlotBatch, netft_viewer::axes.size()> axes{};
 };
 
 class PlotAggregator {

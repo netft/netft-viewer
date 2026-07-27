@@ -29,6 +29,8 @@
     "test:project": "node --test test/project/*.test.mjs",
     "test:native": "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native && ctest --test-dir build/native --output-on-failure",
     "test:unit": "vitest run",
+    "test:coverage:native": "cmake -S . -B build/coverage -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=x86_64-conda-linux-gnu-g++ -DCMAKE_CXX_FLAGS='--coverage -O0 -g' -DCMAKE_EXE_LINKER_FLAGS=--coverage && cmake --build build/coverage --target clean && cmake --build build/coverage && ctest --test-dir build/coverage --output-on-failure && mkdir -p coverage/native && gcovr --gcov-executable x86_64-conda-linux-gnu-gcov --root . --filter '^core/' --filter '^src/' --exclude '^core/netft/test/' --xml-pretty --output coverage/native/coverage.xml build/coverage",
+    "test:coverage:frontend": "vitest run --coverage",
     "test:protocol": "vitest run test/electron/protocol.test.ts",
     "test:companion": "python -m pytest test/companion/companion_process_test.py -q",
     "test:e2e": "pnpm run package:e2e && playwright test",
@@ -59,6 +61,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",
+    "@vitest/coverage-v8": "4.1.10",
     "ajv": "8.17.1",
     "electron": "43.2.0",
     "jsdom": "29.1.1",
@@ -66,6 +69,7 @@
     "prettier": "3.9.6",
     "typescript": "7.0.2",
     "vite": "8.1.5",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   }
 }

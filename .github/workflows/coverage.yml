@@ -1,0 +1,93 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: toolchain
+        name: Install coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build
+          python -m pip install --disable-pip-version-check gcovr==8.3
+      - id: coverage
+        name: Generate native coverage
+        run: |
+          cmake -S . -B build/coverage -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="--coverage -O0 -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+          cmake --build build/coverage
+          ctest --test-dir build/coverage --output-on-failure
+          mkdir -p coverage/native
+          gcovr \
+            --root . \
+            --filter '^core/' \
+            --filter '^src/' \
+            --exclude '^core/netft/test/' \
+            --xml-pretty \
+            --output coverage/native/coverage.xml \
+            build/coverage
+          test -s coverage/native/coverage.xml
+      - id: upload
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage/native/coverage.xml
+          flags: native
+          disable_search: true
+          fail_ci_if_error: true
+          use_oidc: true
+
+  frontend:
+    name: Frontend coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: pnpm
+        name: Bootstrap pnpm
+        run: npm install --global --ignore-scripts pnpm@11.17.0
+      - id: node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - id: install
+        name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - id: coverage
+        name: Generate frontend coverage
+        run: pnpm test:coverage:frontend
+      - id: upload
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage/frontend/lcov.info
+          flags: frontend
+          disable_search: true
+          fail_ci_if_error: true
+          use_oidc: true

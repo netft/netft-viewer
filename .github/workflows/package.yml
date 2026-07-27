@@ -1,0 +1,116 @@
+name: Package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package / ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            architecture: x64
+            artifact_name: netft-viewer-linux-x64
+            artifact_paths: |-
+              out/make/deb/x64/netft-viewer_0.1.0_amd64.deb
+              out/make/netft-viewer-0.1.0-linux-x64.tar.gz
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            architecture: arm64
+            artifact_name: netft-viewer-linux-arm64
+            artifact_paths: |-
+              out/make/deb/arm64/netft-viewer_0.1.0_arm64.deb
+              out/make/netft-viewer-0.1.0-linux-arm64.tar.gz
+          - name: Windows x64
+            runner: windows-2025
+            platform: win32
+            architecture: x64
+            artifact_name: netft-viewer-windows-x64
+            artifact_paths: |-
+              out/make/squirrel.windows/x64/NetFTViewerSetup.exe
+              out/make/squirrel.windows/x64/netft_viewer-0.1.0-full.nupkg
+              out/make/zip/win32/x64/Net F-T Viewer-win32-x64-0.1.0.zip
+          - name: macOS universal
+            runner: macos-15
+            platform: darwin
+            architecture: universal
+            artifact_name: netft-viewer-macos-universal
+            artifact_paths: |-
+              out/make/Net F-T Viewer.dmg
+              out/make/zip/darwin/universal/Net F-T Viewer-darwin-universal-0.1.0.zip
+    steps:
+      - id: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: system-dependencies
+        name: Install packaging dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build fakeroot dpkg-dev patchelf
+      - id: toolchain
+        name: Verify packaging toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          node --version
+      - id: pnpm
+        name: Bootstrap pnpm
+        shell: pwsh
+        run: npm install --global --ignore-scripts pnpm@11.17.0
+      - id: node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - id: install
+        name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - id: make
+        name: Build native installers
+        shell: pwsh
+        env:
+          NETFT_VIEWER_MACOS_SIGN_IDENTITY: ${{ matrix.platform == 'darwin' && secrets.MACOS_SIGN_IDENTITY || '' }}
+          NETFT_VIEWER_MACOS_NOTARIZE: ${{ matrix.platform == 'darwin' && secrets.MACOS_SIGN_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_ID_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && 'true' || 'false' }}
+          NETFT_VIEWER_APPLE_ID: ${{ matrix.platform == 'darwin' && secrets.APPLE_ID || '' }}
+          NETFT_VIEWER_APPLE_ID_PASSWORD: ${{ matrix.platform == 'darwin' && secrets.APPLE_ID_PASSWORD || '' }}
+          NETFT_VIEWER_APPLE_TEAM_ID: ${{ matrix.platform == 'darwin' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          if ($IsWindows) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+            Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
+          }
+          pnpm make --platform "${{ matrix.platform }}" --arch "${{ matrix.architecture }}"
+      - id: verify-artifacts
+        name: Verify installer contents and native companion
+        run: node tools/verify-package-artifacts.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
+      - id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14

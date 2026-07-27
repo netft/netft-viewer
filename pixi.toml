@@ -19,6 +19,8 @@ pkg-config = "*"
 
 [target.linux-64.dependencies]
 patchelf = "*"
+gcovr = "==8.3"
+gxx_linux-64 = "==13.4.0"
 
 [target.linux-aarch64.dependencies]
 patchelf = "*"

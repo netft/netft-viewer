@@ -1,0 +1,53 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 6
+    versioning-strategy: increase
+    groups:
+      electron:
+        patterns:
+          - electron
+          - "@electron/*"
+          - "@electron-forge/*"
+      react:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - scheduler
+      tests:
+        patterns:
+          - "@playwright/*"
+          - "@testing-library/*"
+          - "@vitest/*"
+          - jsdom
+          - vitest
+      development-tooling:
+        dependency-type: development
+        patterns:
+          - "@types/node"
+          - "@vitejs/*"
+          - prettier
+          - typescript
+          - vite
+          - yaml
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns:
+          - "*"
