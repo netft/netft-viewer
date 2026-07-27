@@ -1,7 +1,7 @@
 const PLATFORM_ARCHITECTURES = new Map([
   ["darwin", new Set(["arm64", "universal", "x64"])],
   ["linux", new Set(["arm64", "x64"])],
-  ["win32", new Set(["arm64", "x64"])],
+  ["win32", new Set(["x64"])],
 ]);
 
 export const assertPlatformArchitecture = (platform, architecture) => {

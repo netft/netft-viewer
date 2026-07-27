@@ -17,6 +17,8 @@ const pe = (machine) => {
   bytes.writeUInt32LE(64, 0x3c);
   bytes.write("PE\0\0", 64, "binary");
   bytes.writeUInt16LE(machine, 68);
+  bytes.writeUInt16LE(0x2, 86);
+  bytes.writeUInt16LE(0x10b, 88);
   return bytes;
 };
 
@@ -27,7 +29,6 @@ test("platform and architecture validation accepts only supported native combina
     ["linux", "x64"],
     ["linux", "arm64"],
     ["win32", "x64"],
-    ["win32", "arm64"],
     ["darwin", "x64"],
     ["darwin", "arm64"],
     ["darwin", "universal"],
@@ -40,6 +41,7 @@ test("platform and architecture validation accepts only supported native combina
     ["linux", "universal"],
     ["linux", "ia32"],
     ["win32", "universal"],
+    ["win32", "arm64"],
     ["darwin", "ia32"],
     ["freebsd", "x64"],
   ]) {
@@ -88,27 +90,52 @@ test("ELF and PE headers report actual architecture and reject malformed input",
   assert.equal(parseBinaryArchitecture(elf(183), "linux"), "arm64");
   assert.equal(parseBinaryArchitecture(pe(0x8664), "win32"), "x64");
   assert.equal(parseBinaryArchitecture(pe(0xaa64), "win32"), "arm64");
+  assert.equal(parseBinaryArchitecture(pe(0x14c), "win32"), "ia32");
 
   assert.throws(() => parseBinaryArchitecture(Buffer.alloc(8), "linux"));
   assert.throws(() => parseBinaryArchitecture(elf(3), "linux"));
-  assert.throws(() => parseBinaryArchitecture(pe(0x14c), "win32"));
   assert.throws(() => parseBinaryArchitecture(Buffer.from("not-pe"), "win32"));
   const truncatedPe = pe(0x8664).subarray(0, 66);
   assert.throws(() => parseBinaryArchitecture(truncatedPe, "win32"));
 });
 
-test("Windows setup verification requires the requested PE architecture", async (context) => {
-  const { verifyWindowsSetupArchitecture } =
+test("Windows setup verification accepts the I386 Squirrel bootstrapper, not a payload architecture", async (context) => {
+  const { verifyWindowsSetupBootstrapper } =
     await import("../../tools/lib/artifact-verifier.mjs");
+  const { verifyBinaryArchitecture } =
+    await import("../../tools/lib/binary-inspection.mjs");
   const temporary = await mkdtemp(join(tmpdir(), "netft-setup-architecture-"));
   context.after(() => rm(temporary, { force: true, recursive: true }));
   const setup = join(temporary, "setup.exe");
-  await writeFile(setup, pe(0x8664));
+  await writeFile(setup, pe(0x14c));
 
-  await verifyWindowsSetupArchitecture(setup, "x64");
+  await verifyWindowsSetupBootstrapper(setup, "x64");
   await assert.rejects(
-    verifyWindowsSetupArchitecture(setup, "arm64"),
+    verifyBinaryArchitecture(setup, "win32", "x64"),
     /architecture does not match target/,
+  );
+  await assert.rejects(
+    verifyWindowsSetupBootstrapper(setup, "arm64"),
+    /unsupported desktop target/,
+  );
+
+  const pe32PlusSetup = join(temporary, "pe32-plus-setup.exe");
+  const dllSetup = join(temporary, "dll-setup.exe");
+  const pe32Plus = pe(0x14c);
+  const dll = pe(0x14c);
+  pe32Plus.writeUInt16LE(0x20b, 88);
+  dll.writeUInt16LE(0x2002, 86);
+  await Promise.all([
+    writeFile(pe32PlusSetup, pe32Plus),
+    writeFile(dllSetup, dll),
+  ]);
+  await assert.rejects(
+    verifyWindowsSetupBootstrapper(pe32PlusSetup, "x64"),
+    /valid Squirrel PE32 bootstrapper/,
+  );
+  await assert.rejects(
+    verifyWindowsSetupBootstrapper(dllSetup, "x64"),
+    /valid Squirrel PE32 bootstrapper/,
   );
 });
 
@@ -244,7 +271,7 @@ test("artifact layouts cover every native maker output", async () => {
     expectedArtifacts({
       outDirectory: "/out",
       platform: "win32",
-      architecture: "arm64",
+      architecture: "x64",
       version: "0.1.0",
     }).map(({ kind }) => kind),
     ["setup", "nupkg", "zip"],

@@ -49,6 +49,38 @@ const runCapture = async (command, arguments_) =>
     });
   });
 
+export const parseWindowsPeIdentity = (header) => {
+  if (header.length < 64 || header.toString("ascii", 0, 2) !== "MZ") {
+    throw new Error("native companion is not a PE file");
+  }
+  const peOffset = header.readUInt32LE(0x3c);
+  if (
+    peOffset > header.length - 26 ||
+    header.toString("binary", peOffset, peOffset + 4) !== "PE\0\0"
+  ) {
+    throw new Error("native companion has a malformed PE header");
+  }
+  const machine = header.readUInt16LE(peOffset + 4);
+  let architecture;
+  if (machine === 0x8664) {
+    architecture = "x64";
+  } else if (machine === 0xaa64) {
+    architecture = "arm64";
+  } else if (machine === 0x14c) {
+    architecture = "ia32";
+  } else {
+    throw new Error("native companion has an unsupported PE architecture");
+  }
+  const characteristics = header.readUInt16LE(peOffset + 22);
+  const optionalHeaderMagic = header.readUInt16LE(peOffset + 24);
+  return {
+    architecture,
+    isDll: (characteristics & 0x2000) !== 0,
+    isExecutableImage: (characteristics & 0x2) !== 0,
+    optionalHeaderMagic,
+  };
+};
+
 export const parseBinaryArchitecture = (header, platform) => {
   if (platform === "linux") {
     if (
@@ -70,24 +102,7 @@ export const parseBinaryArchitecture = (header, platform) => {
     throw new Error("native companion has an unsupported ELF architecture");
   }
   if (platform === "win32") {
-    if (header.length < 64 || header.toString("ascii", 0, 2) !== "MZ") {
-      throw new Error("native companion is not a PE file");
-    }
-    const peOffset = header.readUInt32LE(0x3c);
-    if (
-      peOffset > header.length - 6 ||
-      header.toString("binary", peOffset, peOffset + 4) !== "PE\0\0"
-    ) {
-      throw new Error("native companion has a malformed PE header");
-    }
-    const machine = header.readUInt16LE(peOffset + 4);
-    if (machine === 0x8664) {
-      return "x64";
-    }
-    if (machine === 0xaa64) {
-      return "arm64";
-    }
-    throw new Error("native companion has an unsupported PE architecture");
+    return parseWindowsPeIdentity(header).architecture;
   }
   throw new Error("binary header parsing supports only ELF and PE files");
 };
@@ -105,6 +120,9 @@ const readHeader = async (path) => {
 
 export const readBinaryArchitecture = async (path, platform) =>
   parseBinaryArchitecture(await readHeader(path), platform);
+
+export const readWindowsPeIdentity = async (path) =>
+  parseWindowsPeIdentity(await readHeader(path));
 
 const parseLipoArchitectures = (output) => {
   const architectures = new Set();

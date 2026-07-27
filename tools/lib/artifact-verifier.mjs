@@ -5,9 +5,9 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { expectedArtifacts, packageDirectoryPath } from "./artifact-layout.mjs";
-import { readBinaryArchitecture } from "./binary-inspection.mjs";
+import { readWindowsPeIdentity } from "./binary-inspection.mjs";
 import { verifyPackageLayout } from "./package-layout.mjs";
-import { assertNativeTarget } from "./platform.mjs";
+import { assertNativeTarget, assertPlatformArchitecture } from "./platform.mjs";
 
 const MAXIMUM_ENTRIES = 8192;
 const MAXIMUM_TOOL_OUTPUT = 4 * 1024 * 1024;
@@ -135,12 +135,19 @@ const extractTarArchive = async (archive, destination) => {
   await runCapture("tar", ["-xf", archive, "-C", destination]);
 };
 
-export const verifyWindowsSetupArchitecture = async (
+export const verifyWindowsSetupBootstrapper = async (
   executable,
   architecture,
 ) => {
-  if ((await readBinaryArchitecture(executable, "win32")) !== architecture) {
-    throw new Error("Windows setup architecture does not match target");
+  assertPlatformArchitecture("win32", architecture);
+  const identity = await readWindowsPeIdentity(executable);
+  if (
+    identity.architecture !== "ia32" ||
+    identity.optionalHeaderMagic !== 0x10b ||
+    !identity.isExecutableImage ||
+    identity.isDll
+  ) {
+    throw new Error("Windows setup is not a valid Squirrel PE32 bootstrapper");
   }
 };
 
@@ -192,7 +199,7 @@ export const verifyPackageArtifacts = async ({
       });
     } else if (platform === "win32") {
       const setup = artifacts.find(({ kind }) => kind === "setup").path;
-      await verifyWindowsSetupArchitecture(setup, architecture);
+      await verifyWindowsSetupBootstrapper(setup, architecture);
       for (const kind of ["nupkg", "zip"]) {
         const root = join(temporary, kind);
         await mkdir(root, { recursive: true });
