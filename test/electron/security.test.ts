@@ -1,5 +1,12 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -37,6 +44,7 @@ vi.mock("electron", () => ({
 }));
 
 import forgeConfig from "../../forge.config";
+import rendererViteConfig from "../../vite.renderer.config";
 import {
   bindApplicationLifecycle,
   buildRendererAssetSnapshot,
@@ -189,7 +197,7 @@ describe("Electron window security", () => {
     expect(window.show).toHaveBeenCalledOnce();
   });
 
-  it("installs the restrictive CSP on the actual renderer session", () => {
+  it("installs the restrictive production CSP on header and document", async () => {
     const session = fakeSession();
     installSessionSecurity(session);
     let responseHeaders: Record<string, string[]> | undefined;
@@ -208,6 +216,70 @@ describe("Electron window security", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("object-src 'none'");
     expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-eval");
     expect(CONTENT_SECURITY_POLICY).not.toMatch(/https?:\/\/[^; ]+/);
+    expect(CONTENT_SECURITY_POLICY).not.toMatch(/\bws(?:s)?:/);
+    expect(CONTENT_SECURITY_POLICY).not.toContain("localhost");
+    const html = await readFile(resolve("app/renderer/index.html"), "utf8");
+    const metaPolicy = html.match(
+      /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/,
+    )?.[1];
+    expect(metaPolicy).toBe(CONTENT_SECURITY_POLICY);
+  });
+
+  it("allows loopback HMR websockets only in the development header and document", async () => {
+    const session = fakeSession();
+    (
+      installSessionSecurity as (
+        target: ViewerSession,
+        development: boolean,
+      ) => void
+    )(session, true);
+    let responseHeaders: Record<string, string[]> | undefined;
+    session.headersListener?.({ responseHeaders: {} }, (response) => {
+      responseHeaders = response.responseHeaders;
+    });
+    const developmentPolicy =
+      responseHeaders?.["Content-Security-Policy"]?.[0] ?? "";
+    expect(developmentPolicy).toContain("ws://127.0.0.1:*");
+    expect(developmentPolicy).toContain("ws://localhost:*");
+    expect(CONTENT_SECURITY_POLICY).not.toContain("ws://");
+
+    expect(typeof rendererViteConfig).toBe("function");
+    if (typeof rendererViteConfig !== "function") {
+      return;
+    }
+    const config = rendererViteConfig({
+      command: "serve",
+      mode: "development",
+      isPreview: false,
+      isSsrBuild: false,
+    });
+    const plugins = (Array.isArray(config.plugins)
+      ? config.plugins.flat()
+      : []) as unknown as Array<{
+      name?: string;
+      transformIndexHtml?: (
+        html: string,
+        context: never,
+      ) => Promise<string | { html: string }> | string | { html: string };
+    }>;
+    const cspPlugin = plugins.find(
+      (plugin) => plugin.name === "netft-viewer-csp",
+    );
+    expect(cspPlugin).toBeDefined();
+    if (
+      cspPlugin === undefined ||
+      typeof cspPlugin.transformIndexHtml !== "function"
+    ) {
+      return;
+    }
+    const html = await readFile(resolve("app/renderer/index.html"), "utf8");
+    const transformed = await cspPlugin.transformIndexHtml(html, {} as never);
+    const output =
+      typeof transformed === "string" ? transformed : transformed.html;
+    const metaPolicy = output.match(
+      /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/,
+    )?.[1];
+    expect(metaPolicy).toBe(developmentPolicy);
   });
 
   it("configures ASAR integrity and disables Node execution through Forge", () => {

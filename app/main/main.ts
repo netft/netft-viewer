@@ -22,24 +22,17 @@ import type {
   OnHeadersReceivedListenerDetails,
 } from "electron";
 
+import {
+  DEVELOPMENT_CONTENT_SECURITY_POLICY,
+  PRODUCTION_CONTENT_SECURITY_POLICY,
+} from "../shared/content-security-policy";
 import { CompanionSupervisor } from "./companion-supervisor";
 import { DialogService } from "./dialog-service";
 import { registerIpcHandlers } from "./ipc-handlers";
 import { LogStore } from "./log-store";
 import { SettingsStore } from "./settings-store";
 
-export const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'none'",
-].join("; ");
+export const CONTENT_SECURITY_POLICY = PRODUCTION_CONTENT_SECURITY_POLICY;
 
 interface NavigationEvent {
   preventDefault(): void;
@@ -178,7 +171,13 @@ export const createViewerWindow = async (
   return window;
 };
 
-export const installSessionSecurity = (session: ViewerSession): void => {
+export const installSessionSecurity = (
+  session: ViewerSession,
+  development = false,
+): void => {
+  const contentSecurityPolicy = development
+    ? DEVELOPMENT_CONTENT_SECURITY_POLICY
+    : CONTENT_SECURITY_POLICY;
   session.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
   });
@@ -187,7 +186,7 @@ export const installSessionSecurity = (session: ViewerSession): void => {
     callback({
       responseHeaders: {
         ...(details.responseHeaders ?? {}),
-        "Content-Security-Policy": [CONTENT_SECURITY_POLICY],
+        "Content-Security-Policy": [contentSecurityPolicy],
       },
     });
   });
@@ -628,12 +627,15 @@ const boot = async (): Promise<void> => {
     await import("electron");
   registerRendererScheme(protocol);
   await app.whenReady();
-  installSessionSecurity(session.defaultSession);
   const developmentRendererUrl =
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "string" &&
     MAIN_WINDOW_VITE_DEV_SERVER_URL.length > 0
       ? MAIN_WINDOW_VITE_DEV_SERVER_URL
       : undefined;
+  installSessionSecurity(
+    session.defaultSession,
+    developmentRendererUrl !== undefined,
+  );
   if (developmentRendererUrl === undefined) {
     installRendererProtocol(
       protocol,
