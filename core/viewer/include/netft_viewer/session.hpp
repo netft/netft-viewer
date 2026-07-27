@@ -117,6 +117,9 @@ public:
   [[nodiscard]] SessionEventRead try_pop();
   [[nodiscard]] SessionEventRead
   wait_for_event(std::chrono::milliseconds timeout);
+  // Stops accepting events while allowing a consumer to drain the events
+  // already queued. Reads return Closed after the queue becomes empty.
+  void finish() noexcept;
   void close() noexcept;
 
   // ViewerSession lifecycle controls. Consumers do not need these methods.

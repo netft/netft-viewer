@@ -533,6 +533,118 @@ class CompanionProcessTest(unittest.TestCase):
             self.assertGreater(len(target.read_text().splitlines()), 1)
             companion.close()
 
+    def test_shutdown_reports_finalization_failure_after_recovery_events(self) -> None:
+        with FakeSensor() as sensor, tempfile.TemporaryDirectory() as directory:
+            companion = CompanionProcess(
+                [
+                    f"--rdt-port={sensor.rdt_port}",
+                    f"--http-port={sensor.http_port}",
+                ]
+            )
+            target = Path(directory) / "blocked.csv"
+            target.mkdir()
+            companion.send(
+                command(
+                    "connect",
+                    "req-connect",
+                    payload={"sensorHost": "127.0.0.1"},
+                )
+            )
+            companion.read_until(
+                lambda event: event.get("requestId") == "req-connect"
+            )
+            companion.read_until(lambda event: event["type"] == "live_wrench")
+            companion.send(
+                command(
+                    "start_recording",
+                    "req-record",
+                    payload={"targetPath": str(target), "overwrite": True},
+                )
+            )
+            companion.read_until(
+                lambda event: event.get("requestId") == "req-record"
+            )
+            companion.read_until(lambda event: event["type"] == "live_wrench")
+
+            companion.send(command("shutdown", "req-shutdown"))
+            result, frames = companion.read_until(
+                lambda event: event.get("requestId") == "req-shutdown"
+            )
+
+            self.assertEqual(result["type"], "command_result")
+            self.assertFalse(result["payload"]["success"])
+            self.assertTrue(
+                any(
+                    event["type"] == "recording_state"
+                    and event["payload"]["state"] == "error"
+                    and event["payload"]["partialPath"] == f"{target}.partial"
+                    for event in frames
+                )
+            )
+            self.assertTrue(
+                any(
+                    event["type"] == "error"
+                    and event["payload"]["operation"] == "stop_recording"
+                    for event in frames
+                )
+            )
+            self.assertEqual(companion.process.wait(timeout=5), 0)
+            self.assertTrue(Path(f"{target}.partial").is_file())
+            companion.close()
+
+    def test_eof_returns_failure_when_recording_cannot_be_finalized(self) -> None:
+        with FakeSensor() as sensor, tempfile.TemporaryDirectory() as directory:
+            companion = CompanionProcess(
+                [
+                    f"--rdt-port={sensor.rdt_port}",
+                    f"--http-port={sensor.http_port}",
+                ]
+            )
+            target = Path(directory) / "blocked.csv"
+            target.mkdir()
+            companion.send(
+                command(
+                    "connect",
+                    "req-connect",
+                    payload={"sensorHost": "127.0.0.1"},
+                )
+            )
+            companion.read_until(
+                lambda event: event.get("requestId") == "req-connect"
+            )
+            companion.read_until(lambda event: event["type"] == "live_wrench")
+            companion.send(
+                command(
+                    "start_recording",
+                    "req-record",
+                    payload={"targetPath": str(target), "overwrite": True},
+                )
+            )
+            companion.read_until(
+                lambda event: event.get("requestId") == "req-record"
+            )
+            companion.read_until(lambda event: event["type"] == "live_wrench")
+
+            assert companion.process.stdin is not None
+            companion.process.stdin.close()
+            self.assertNotEqual(companion.process.wait(timeout=5), 0)
+            companion._stdout_thread.join(timeout=5)
+            frames = []
+            while True:
+                event = companion._events.get(timeout=1)
+                if event is None:
+                    break
+                frames.append(event)
+            self.assertTrue(
+                any(
+                    event["type"] == "recording_state"
+                    and event["payload"]["state"] == "error"
+                    for event in frames
+                )
+            )
+            self.assertTrue(Path(f"{target}.partial").is_file())
+            companion.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -285,6 +285,40 @@ TEST(RecorderTest,
   EXPECT_GE(std::filesystem::file_size(partial), 1U);
 }
 
+TEST(RecorderTest,
+     AClosedErrorCanRestartAtANewPathWithoutRemovingRecoveryData) {
+  TestDirectory directory;
+  const auto failed_target = directory.file("failed.csv");
+  std::filesystem::create_directory(failed_target);
+  const auto recovery =
+      std::filesystem::path(failed_target.string() + ".partial");
+  Recorder recorder;
+
+  ASSERT_EQ(recorder.start(failed_target, OverwritePolicy::Replace),
+            RecorderResult::Ok);
+  ASSERT_EQ(recorder.submit(sample_at(5U, std::chrono::steady_clock::now())),
+            SubmitResult::Accepted);
+  ASSERT_EQ(recorder.stop(), RecorderResult::Failed);
+  ASSERT_EQ(recorder.snapshot().state, RecordingState::Error);
+  ASSERT_TRUE(std::filesystem::exists(recovery));
+
+  EXPECT_EQ(recorder.start(failed_target, OverwritePolicy::Replace),
+            RecorderResult::PartialExists);
+  EXPECT_EQ(recorder.snapshot().state, RecordingState::Error);
+  EXPECT_EQ(recorder.snapshot().partial_path, recovery);
+
+  const auto restarted_target = directory.file("restarted.csv");
+  ASSERT_EQ(recorder.start(restarted_target, OverwritePolicy::Refuse),
+            RecorderResult::Ok);
+  ASSERT_EQ(recorder.submit(sample_at(6U, std::chrono::steady_clock::now())),
+            SubmitResult::Accepted);
+  ASSERT_EQ(recorder.stop(), RecorderResult::Ok);
+
+  EXPECT_TRUE(std::filesystem::exists(recovery));
+  EXPECT_TRUE(std::filesystem::exists(restarted_target));
+  EXPECT_EQ(recorder.snapshot().state, RecordingState::Idle);
+}
+
 TEST(RecorderTest, RefusePromotionDoesNotClobberADestinationCreatedAfterStart) {
   TestDirectory directory;
   const auto target = directory.file();

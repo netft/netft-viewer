@@ -309,6 +309,40 @@ TEST(ViewerSessionTest, RecordingFailurePreservesTheStreamingConnection) {
   }));
 }
 
+TEST(ViewerSessionTest, DisconnectReportsRecordingFinalizationFailure) {
+  netft::test::FakeSensor sensor;
+  CapturingSink sink;
+  auto writer = std::make_shared<test::ControlledWriterState>();
+  auto recorder = std::make_shared<Recorder>(
+      RecorderOptions{}, nullptr,
+      std::make_shared<test::ControlledRecorderStorage>(writer));
+  ViewerSession session(sink.channel(), options({}, recorder));
+  connect_and_stream(session, sink, sensor);
+  ASSERT_EQ(session.start_recording("disconnect-failure.csv", false),
+            SessionResult::Ok);
+  sensor.send_record_now(2U, 0U, 108U);
+  ASSERT_TRUE(sink.wait(
+      [&] { return session.snapshot().recording.accepted_samples == 1U; }));
+  {
+    std::lock_guard<std::mutex> lock(writer->mutex);
+    writer->fail_promote = true;
+  }
+
+  EXPECT_EQ(session.disconnect(), SessionResult::Failed);
+  EXPECT_EQ(session.snapshot().connection.state, ConnectionState::Disconnected);
+  EXPECT_EQ(session.snapshot().recording.state, RecordingState::Error);
+  ASSERT_TRUE(sink.wait([&] {
+    return std::any_of(
+        sink.errors.begin(), sink.errors.end(), [](const SessionError &error) {
+          return error.operation == SessionOperation::StopRecording;
+        });
+  }));
+  ASSERT_FALSE(sink.recordings.empty());
+  EXPECT_EQ(sink.recordings.back().state, RecordingState::Error);
+  EXPECT_EQ(sink.recordings.back().partial_path,
+            std::filesystem::path{"disconnect-failure.csv.partial"});
+}
+
 TEST(ViewerSessionTest, ConfigurationRevisionChangesArePublished) {
   netft::test::FakeSensor sensor{200.0};
   CapturingSink sink;

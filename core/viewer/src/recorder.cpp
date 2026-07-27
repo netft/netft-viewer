@@ -266,7 +266,19 @@ Recorder::~Recorder() {
 RecorderResult Recorder::start(const std::filesystem::path &target,
                                OverwritePolicy overwrite) {
   std::lock_guard<std::mutex> operation_lock(operation_mutex_);
-  if (state_.load(std::memory_order_acquire) != RecordingState::Idle ||
+  auto current = state_.load(std::memory_order_acquire);
+  const auto restarting_closed_error =
+      current == RecordingState::Error && !writer_thread_.joinable() &&
+      file_ == nullptr && submission_gate_.drained();
+  if (restarting_closed_error) {
+    {
+      std::lock_guard<std::mutex> wait_lock(wait_mutex_);
+      if (!writer_done_) {
+        return RecorderResult::InvalidState;
+      }
+    }
+  }
+  if ((current != RecordingState::Idle && !restarting_closed_error) ||
       writer_thread_.joinable()) {
     return RecorderResult::InvalidState;
   }
@@ -291,6 +303,9 @@ RecorderResult Recorder::start(const std::filesystem::path &target,
     return RecorderResult::Failed;
   }
 
+  if (restarting_closed_error) {
+    discard_queued_samples();
+  }
   state_.store(RecordingState::Starting, std::memory_order_release);
   accepted_samples_.store(0, std::memory_order_relaxed);
   written_samples_.store(0, std::memory_order_relaxed);
@@ -734,6 +749,12 @@ void Recorder::finish_error_file() noexcept {
   }
   bytes_written_.store(file_->bytes_written(), std::memory_order_relaxed);
   file_.reset();
+}
+
+void Recorder::discard_queued_samples() noexcept {
+  RecordedSample ignored;
+  while (queue_.try_pop(ignored)) {
+  }
 }
 
 bool Recorder::drain_complete() const noexcept {

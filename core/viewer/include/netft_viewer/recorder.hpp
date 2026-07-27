@@ -114,6 +114,7 @@ private:
   void enter_error(std::string_view error) noexcept;
   void enter_overflow_error() noexcept;
   void finish_error_file() noexcept;
+  void discard_queued_samples() noexcept;
   bool drain_complete() const noexcept;
 
   RecorderOptions options_;

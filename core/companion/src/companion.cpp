@@ -87,6 +87,13 @@ public:
     }
   }
 
+  bool finish_session_events() {
+    sink_.finish();
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return session_events_finished_ || failed_; });
+    return session_events_finished_ && !failed_;
+  }
+
   [[nodiscard]] bool failed() const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     return failed_;
@@ -161,7 +168,13 @@ private:
         }
       }
 
-      std::lock_guard<std::mutex> lock(mutex_);
+      std::unique_lock<std::mutex> lock(mutex_);
+      if (read.status == SessionEventReadStatus::Closed) {
+        session_events_finished_ = true;
+        condition_.notify_all();
+        condition_.wait(
+            lock, [&] { return pending_.has_value() || closing_ || failed_; });
+      }
       if (closing_ && !pending_ &&
           read.status == SessionEventReadStatus::Closed) {
         return;
@@ -194,6 +207,7 @@ private:
   std::uint64_t completed_ticket_{};
   bool closing_{};
   bool failed_{};
+  bool session_events_finished_{};
   std::thread thread_;
 };
 
@@ -504,7 +518,10 @@ private:
             logs << "command processing failed\n";
           }
           session.reset();
-          sink.close();
+          if (!writer.finish_session_events()) {
+            logs << "companion event output failed\n";
+            result = 3;
+          }
           auto response =
               command_result(shutdown->header, "shutdown", session_result);
           if (!response || !writer.submit(std::move(*response))) {
@@ -562,8 +579,20 @@ private:
     }
 
     source.cancel();
+    auto session_result = SessionResult::Ok;
+    try {
+      session_result = session->disconnect();
+    } catch (...) {
+      session_result = SessionResult::Failed;
+      logs << "session shutdown failed\n";
+    }
+    if (session_result != SessionResult::Ok && result == 0) {
+      result = 2;
+    }
     session.reset();
-    sink.close();
+    if (!writer.finish_session_events()) {
+      result = 3;
+    }
     writer.close();
     writer.join();
     if (writer.failed()) {

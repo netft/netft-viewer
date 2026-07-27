@@ -117,6 +117,7 @@ public:
   detail::SessionEventQueue events;
   std::shared_ptr<MeasurementLease::State> measurement_state;
   std::uint64_t next_measurement_epoch{};
+  bool finishing{};
   bool closed{};
 };
 
@@ -128,7 +129,7 @@ void SessionEventSink::enqueue(SessionEvent event) noexcept {
   try {
     {
       std::lock_guard<std::mutex> lock(impl_->mutex);
-      if (impl_->closed) {
+      if (impl_->closed || impl_->finishing) {
         return;
       }
       const auto measurement =
@@ -154,23 +155,43 @@ SessionEventRead SessionEventSink::try_pop() {
     return {SessionEventReadStatus::Closed, std::nullopt};
   }
   auto event = impl_->events.pop();
-  return event
-             ? SessionEventRead{SessionEventReadStatus::Event, std::move(event)}
-             : SessionEventRead{SessionEventReadStatus::Empty, std::nullopt};
+  if (event) {
+    return {SessionEventReadStatus::Event, std::move(event)};
+  }
+  return {impl_->finishing ? SessionEventReadStatus::Closed
+                           : SessionEventReadStatus::Empty,
+          std::nullopt};
 }
 
 SessionEventRead
 SessionEventSink::wait_for_event(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(impl_->mutex);
-  impl_->condition.wait_for(
-      lock, timeout, [&] { return impl_->closed || !impl_->events.empty(); });
+  impl_->condition.wait_for(lock, timeout, [&] {
+    return impl_->closed || impl_->finishing || !impl_->events.empty();
+  });
   if (impl_->closed) {
     return {SessionEventReadStatus::Closed, std::nullopt};
   }
   auto event = impl_->events.pop();
-  return event
-             ? SessionEventRead{SessionEventReadStatus::Event, std::move(event)}
-             : SessionEventRead{SessionEventReadStatus::Empty, std::nullopt};
+  if (event) {
+    return {SessionEventReadStatus::Event, std::move(event)};
+  }
+  return {impl_->finishing ? SessionEventReadStatus::Closed
+                           : SessionEventReadStatus::Empty,
+          std::nullopt};
+}
+
+void SessionEventSink::finish() noexcept {
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (impl_->closed || impl_->finishing) {
+      return;
+    }
+    impl_->finishing = true;
+    impl_->measurement_state->valid.store(false, std::memory_order_release);
+    impl_->events.purge_measurements(0U);
+  }
+  impl_->condition.notify_all();
 }
 
 void SessionEventSink::close() noexcept {
@@ -180,6 +201,7 @@ void SessionEventSink::close() noexcept {
       return;
     }
     impl_->closed = true;
+    impl_->finishing = true;
     impl_->measurement_state->valid.store(false, std::memory_order_release);
     impl_->events.clear();
   }
@@ -193,7 +215,7 @@ void SessionEventSink::purge_measurements(std::uint64_t generation) noexcept {
 
 void SessionEventSink::retain_generation(std::uint64_t generation) noexcept {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  if (impl_->closed) {
+  if (impl_->closed || impl_->finishing) {
     return;
   }
   impl_->events.retain_generation(generation);
@@ -201,7 +223,7 @@ void SessionEventSink::retain_generation(std::uint64_t generation) noexcept {
 
 bool SessionEventSink::begin_measurements() noexcept {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  if (impl_->closed) {
+  if (impl_->closed || impl_->finishing) {
     return false;
   }
   impl_->measurement_state->valid.store(false, std::memory_order_release);
@@ -323,11 +345,13 @@ public:
       health_thread_.join();
     }
 
+    bool recording_failed = false;
     const auto recording = recorder_->snapshot().state;
     if (recording != RecordingState::Idle) {
       const auto result = recorder_->stop();
       publish_recording(generation);
       if (result != RecorderResult::Ok) {
+        recording_failed = true;
         publish_error(generation, SessionOperation::StopRecording,
                       recorder_->snapshot().last_error);
       }
@@ -345,7 +369,7 @@ public:
       configuration_.reset();
     }
     events_.push(generation, connection_copy());
-    return SessionResult::Ok;
+    return recording_failed ? SessionResult::Failed : SessionResult::Ok;
   }
 
   SessionResult set_paused(bool paused) {
