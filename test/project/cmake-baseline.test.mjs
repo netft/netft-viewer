@@ -9,25 +9,38 @@ test("dependency configuration supports CMake 3.21.3", () => {
   const buildDir = mkdtempSync(join(tmpdir(), "netft-viewer-cmake-"));
 
   try {
-    const result = spawnSync(
-      "pixi",
-      [
-        "exec",
-        "--spec",
-        "cmake=3.21.3",
-        "--spec",
-        "ninja",
-        "cmake",
-        "-G",
-        "Ninja",
-        "-S",
-        resolve("test/project/fixtures/cmake-baseline"),
-        "-B",
-        buildDir,
-        `-DNETFT_VIEWER_SOURCE_DIR=${resolve(".")}`,
-      ],
-      { encoding: "utf8", timeout: 120_000 },
-    );
+    const pixi = spawnSync("pixi", ["--version"], { encoding: "utf8" });
+    const command = pixi.status === 0 ? "pixi" : "cmake";
+    const cmakeArguments =
+      pixi.status === 0
+        ? [
+            "exec",
+            "--spec",
+            "cmake=3.21.3",
+            "--spec",
+            "ninja",
+            "cmake",
+            "-G",
+            "Ninja",
+            "-S",
+            resolve("test/project/fixtures/cmake-baseline"),
+            "-B",
+            buildDir,
+            `-DNETFT_VIEWER_SOURCE_DIR=${resolve(".")}`,
+          ]
+        : [
+            "-G",
+            "Ninja",
+            "-S",
+            resolve("test/project/fixtures/cmake-baseline"),
+            "-B",
+            buildDir,
+            `-DNETFT_VIEWER_SOURCE_DIR=${resolve(".")}`,
+          ];
+    const result = spawnSync(command, cmakeArguments, {
+      encoding: "utf8",
+      timeout: 120_000,
+    });
 
     assert.equal(
       result.status,

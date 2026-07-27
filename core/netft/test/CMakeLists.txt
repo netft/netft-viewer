@@ -53,7 +53,7 @@ target_link_libraries(netft_socket_runtime PRIVATE
 
 add_test(NAME netft_socket_runtime COMMAND netft_socket_runtime)
 
-if(NOT WIN32)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(netft_posix_transport
     test_posix_transport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/detail/udp_transport_posix.cpp
