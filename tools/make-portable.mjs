@@ -10,7 +10,15 @@ import {
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import process from "node:process";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
@@ -183,11 +191,11 @@ export const makePortable = async (sourceArgument, outputArgument) => {
     outputArgument ?? join("out", "make", `${prefix}.tar.gz`),
   );
   const sourceRelativeOutput = relative(source, output);
-  if (
-    sourceRelativeOutput === "" ||
-    (!sourceRelativeOutput.startsWith("..") &&
-      !sourceRelativeOutput.startsWith("/"))
-  ) {
+  const outputIsOutsideSource =
+    sourceRelativeOutput === ".." ||
+    sourceRelativeOutput.startsWith(`..${sep}`) ||
+    isAbsolute(sourceRelativeOutput);
+  if (!outputIsOutsideSource) {
     throw new Error("portable output must be outside the packaged directory");
   }
   await rejectSymlinks(source);

@@ -160,14 +160,16 @@ export interface ViewerFixture {
 
 const packagedExecutable = (): string => {
   if (process.platform === "linux") {
-    return resolve(`out/Net F-T Viewer-linux-${process.arch}/netft-viewer`);
+    return resolve(`out/e2e/Net F-T Viewer-linux-${process.arch}/netft-viewer`);
   }
   if (process.platform === "darwin") {
     return resolve(
-      `out/Net F-T Viewer-darwin-${process.arch}/Net F-T Viewer.app/Contents/MacOS/netft-viewer`,
+      `out/e2e/Net F-T Viewer-darwin-${process.arch}/Net F-T Viewer.app/Contents/MacOS/netft-viewer`,
     );
   }
-  return resolve(`out/Net F-T Viewer-win32-${process.arch}/netft-viewer.exe`);
+  return resolve(
+    `out/e2e/Net F-T Viewer-win32-${process.arch}/netft-viewer.exe`,
+  );
 };
 
 export const test = base.extend<{ viewer: ViewerFixture }>({

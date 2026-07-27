@@ -8,59 +8,26 @@ import {
   lstat,
   readFile,
   readdir,
-  realpath,
   rename,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { extractFile, listPackage } from "@electron/asar";
-
 const packageDirectory = process.env.NETFT_VIEWER_PACKAGE_DIR;
 const packageTestOptions = { skip: packageDirectory === undefined };
+const packageArchitecture =
+  process.env.NETFT_VIEWER_PACKAGE_ARCHITECTURE ?? process.arch;
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const expectedSnapshot = (await readFile("CORE_SNAPSHOT.md", "utf8")).match(
   /\b[0-9a-f]{40}\b/,
 )?.[0];
 assert.notEqual(expectedSnapshot, undefined);
-
-const packagedLayout = () => {
-  const root = resolve(packageDirectory);
-  if (process.platform === "darwin") {
-    const appName = basename(root).endsWith(".app")
-      ? root
-      : join(root, "Net F-T Viewer.app");
-    const contents = join(appName, "Contents");
-    return {
-      root,
-      resources: join(contents, "Resources"),
-      companion: join(
-        contents,
-        "Resources",
-        "companion",
-        "netft-viewer-companion",
-      ),
-    };
-  }
-  return {
-    root,
-    resources: join(root, "resources"),
-    companion: join(
-      root,
-      "resources",
-      "companion",
-      process.platform === "win32"
-        ? "netft-viewer-companion.exe"
-        : "netft-viewer-companion",
-    ),
-  };
-};
 
 const runCompanionHandshake = async (executable) => {
   const requestId = "package-layout";
@@ -122,23 +89,6 @@ const runCompanionHandshake = async (executable) => {
   });
 };
 
-const collectFiles = async (root) => {
-  const files = [];
-  const visit = async (directory) => {
-    const entries = await readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const candidate = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(candidate);
-      } else {
-        files.push(candidate);
-      }
-    }
-  };
-  await visit(root);
-  return files;
-};
-
 const writeFakeCompanion = async (
   path,
   { appVersion = packageJson.version, snapshot = expectedSnapshot } = {},
@@ -181,6 +131,39 @@ input.on("line", (line) => {
   await chmod(path, 0o755);
 };
 
+const writeNativeFakeCompanion = async (
+  path,
+  { appVersion = packageJson.version, snapshot = expectedSnapshot } = {},
+) => {
+  await mkdir(dirname(path), { recursive: true });
+  const source = `${path}.c`;
+  await writeFile(
+    source,
+    `#include <stdio.h>
+#include <string.h>
+int main(void) {
+  char line[4096];
+  while (fgets(line, sizeof(line), stdin) != NULL) {
+    if (strstr(line, "\\"type\\":\\"hello\\"") != NULL) {
+      fputs("{\\"protocol\\":{\\"major\\":1,\\"minor\\":0},\\"type\\":\\"hello\\",\\"requestId\\":\\"package-hello\\",\\"monotonicNs\\":\\"1\\",\\"payload\\":{\\"protocolMajor\\":1,\\"protocolMinor\\":0,\\"appVersion\\":\\"${appVersion}\\",\\"coreSnapshot\\":\\"${snapshot}\\"}}\\n", stdout);
+      fflush(stdout);
+    } else if (strstr(line, "\\"type\\":\\"shutdown\\"") != NULL) {
+      fputs("{\\"protocol\\":{\\"major\\":1,\\"minor\\":0},\\"type\\":\\"command_result\\",\\"requestId\\":\\"package-shutdown\\",\\"monotonicNs\\":\\"2\\",\\"payload\\":{\\"commandType\\":\\"shutdown\\",\\"success\\":true}}\\n", stdout);
+      fflush(stdout);
+      return 0;
+    }
+  }
+  return 1;
+}
+`,
+  );
+  const compiled = spawnSync("cc", ["-O2", source, "-o", path], {
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  assert.equal(compiled.status, 0, compiled.stderr);
+};
+
 const runNodeTool = (arguments_, options = {}) =>
   spawnSync(process.execPath, arguments_, {
     cwd: process.cwd(),
@@ -193,34 +176,13 @@ test(
   "packaged application keeps the executable companion outside asar and the renderer inside",
   packageTestOptions,
   async () => {
-    const layout = packagedLayout();
-    const archive = join(layout.resources, "app.asar");
-    const archiveFiles = listPackage(archive);
-    const metadata = await lstat(layout.companion);
-
-    assert.equal(metadata.isSymbolicLink(), false);
-    assert.equal(metadata.isFile(), true);
-    if (process.platform !== "win32") {
-      await access(layout.companion, constants.X_OK);
-    }
-    assert.equal(
-      archiveFiles.some((path) =>
-        path.startsWith("/.vite/renderer/main_window/"),
-      ),
-      true,
-    );
-    assert.equal(
-      archiveFiles.some((path) => path.includes("netft-viewer-companion")),
-      false,
-    );
-
-    const frames = await runCompanionHandshake(layout.companion);
-    assert.equal(frames[0]?.type, "hello");
-    assert.equal(frames[0]?.requestId, "package-layout");
-    assert.equal(frames[0]?.payload?.protocolMajor, 1);
-    assert.equal(frames[0]?.payload?.protocolMinor, 0);
-    assert.equal(frames[0]?.payload?.appVersion, packageJson.version);
-    assert.equal(frames[0]?.payload?.coreSnapshot, expectedSnapshot);
+    const { verifyPackageLayout } =
+      await import("../../tools/lib/package-layout.mjs");
+    await verifyPackageLayout({
+      packageDirectory,
+      platform: process.platform,
+      architecture: packageArchitecture,
+    });
   },
 );
 
@@ -238,7 +200,7 @@ test(
       "companion",
       "netft-viewer-companion",
     );
-    await writeFakeCompanion(executable);
+    await writeNativeFakeCompanion(executable);
 
     const result = runNodeTool([
       "tools/copy-companion.mjs",
@@ -275,7 +237,7 @@ test(
     const stagingRoot = join(temporary, "stage");
 
     const wrongBuild = join(temporary, "wrong");
-    await writeFakeCompanion(
+    await writeNativeFakeCompanion(
       join(wrongBuild, "core", "companion", "netft-viewer-companion"),
       { appVersion: "99.0.0" },
     );
@@ -289,9 +251,24 @@ test(
     ]);
     assert.notEqual(wrong.status, 0);
 
+    const architectureBuild = join(temporary, "architecture");
+    await writeNativeFakeCompanion(
+      join(architectureBuild, "core", "companion", "netft-viewer-companion"),
+    );
+    const wrongArchitecture = runNodeTool([
+      "tools/copy-companion.mjs",
+      architectureBuild,
+      process.platform,
+      process.arch === "x64" ? "arm64" : "x64",
+      "--staging-root",
+      stagingRoot,
+    ]);
+    assert.notEqual(wrongArchitecture.status, 0);
+    assert.match(wrongArchitecture.stderr, /architecture/);
+
     const symlinkBuild = join(temporary, "symlink");
     const outside = join(temporary, "outside-companion");
-    await writeFakeCompanion(outside);
+    await writeNativeFakeCompanion(outside);
     const symlinked = join(
       symlinkBuild,
       "core",
@@ -395,6 +372,41 @@ test(
   },
 );
 
+test(
+  "make-portable rejects every output inside the packaged source without creating a temporary archive",
+  { skip: process.platform !== "linux" },
+  async (context) => {
+    const temporary = await mkdtemp(
+      join(tmpdir(), "netft-viewer-containment-"),
+    );
+    context.after(() => rm(temporary, { force: true, recursive: true }));
+    const application = join(temporary, "Net F-T Viewer-linux-x64");
+    await writeFakeCompanion(
+      join(application, "resources", "companion", "netft-viewer-companion"),
+    );
+    await writeFile(join(application, "resources", "app.asar"), "archive\n");
+    const misleadingChild = join(application, "..evil");
+    const output = join(misleadingChild, "escape.tar.gz");
+
+    const result = runNodeTool([
+      "tools/make-portable.mjs",
+      application,
+      output,
+    ]);
+
+    assert.notEqual(result.status, 0);
+    await assert.rejects(access(output, constants.F_OK));
+    await assert.rejects(
+      access(`${output}.${result.pid ?? process.pid}.tmp`, constants.F_OK),
+    );
+    const childEntries = await readdir(misleadingChild).catch((error) => {
+      assert.equal(error.code, "ENOENT");
+      return [];
+    });
+    assert.deepEqual(childEntries, []);
+  },
+);
+
 test("native dependency reports reject unresolved and build-tree libraries", async () => {
   const { validateDependencyReport } =
     await import("../../tools/check-native-artifact.mjs");
@@ -442,76 +454,13 @@ test(
   "production package excludes test hooks, project sources, source maps, and a configured sensitive host",
   packageTestOptions,
   async () => {
-    const layout = packagedLayout();
-    const archive = join(layout.resources, "app.asar");
-    const archiveFiles = listPackage(archive);
-    const forbiddenArchiveSegments = [
-      "/app/",
-      "/core/",
-      "/test/",
-      "/tools/",
-      "/.superpowers/",
-    ];
-
-    assert.equal(
-      archiveFiles.some(
-        (path) =>
-          forbiddenArchiveSegments.some((segment) =>
-            path.startsWith(segment),
-          ) || /\.(?:map|ts|tsx|cpp|cc|cxx|h|hpp)$/.test(path),
-      ),
-      false,
-    );
-    assert.equal(
-      archiveFiles.some((path) => path.includes("fake-companion")),
-      false,
-    );
-
-    const mainBundle = extractFile(archive, ".vite/build/main.js").toString(
-      "utf8",
-    );
-    for (const forbidden of [
-      "NETFT_VIEWER_E2E_BUILD",
-      "NETFT_VIEWER_E2E_CONTROL_FILE",
-      "NETFT_VIEWER_E2E_CONTROL_TOKEN",
-      "NETFT_VIEWER_E2E_FAILURE_SENTINEL",
-      "fake-companion.mjs",
-    ]) {
-      assert.equal(mainBundle.includes(forbidden), false);
-    }
-
-    const sensitiveHost = process.env.NETFT_VIEWER_FORBIDDEN_SENSOR_HOST;
-    if (sensitiveHost !== undefined && sensitiveHost.length > 0) {
-      for (const path of archiveFiles.filter((path) =>
-        /\.(?:html|js|json|css)$/.test(path),
-      )) {
-        assert.equal(
-          extractFile(archive, path.replace(/^\/+/, "")).includes(
-            sensitiveHost,
-          ),
-          false,
-          `${path} contains the configured sensitive host`,
-        );
-      }
-      for (const path of await collectFiles(layout.resources)) {
-        const relativePath = relative(layout.resources, path);
-        if (
-          relativePath === "app.asar" ||
-          relativePath.split(sep).includes("companion")
-        ) {
-          continue;
-        }
-        const metadata = await lstat(path);
-        if (metadata.size <= 4 * 1024 * 1024) {
-          assert.equal(
-            (await readFile(path)).includes(sensitiveHost),
-            false,
-            `${relativePath} contains the configured sensitive host`,
-          );
-        }
-      }
-    }
-
-    assert.equal(await realpath(layout.companion), resolve(layout.companion));
+    const { verifyPackageLayout } =
+      await import("../../tools/lib/package-layout.mjs");
+    await verifyPackageLayout({
+      packageDirectory,
+      platform: process.platform,
+      architecture: packageArchitecture,
+      sensitiveValue: process.env.NETFT_VIEWER_FORBIDDEN_SENSOR_HOST,
+    });
   },
 );

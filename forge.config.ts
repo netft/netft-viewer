@@ -41,6 +41,7 @@ const macNotarization = () => {
 };
 
 const config = {
+  ...(e2eBuild ? { outDir: resolve("out/e2e") } : {}),
   packagerConfig: {
     asar: true,
     appBundleId: "org.netft.viewer",

@@ -15,10 +15,9 @@ import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import { verifyBinaryArchitecture } from "./lib/binary-inspection.mjs";
 import { verifyCompanion } from "./lib/companion-handshake.mjs";
-
-const SUPPORTED_PLATFORMS = new Set(["darwin", "linux", "win32"]);
-const SUPPORTED_ARCHITECTURES = new Set(["arm64", "ia32", "universal", "x64"]);
+import { assertPlatformArchitecture } from "./lib/platform.mjs";
 
 const usage = () => {
   throw new Error(
@@ -39,12 +38,7 @@ const parseArguments = (arguments_) => {
     stagingRoot = rest[index + 1];
     index += 1;
   }
-  if (
-    !SUPPORTED_PLATFORMS.has(platform) ||
-    !SUPPORTED_ARCHITECTURES.has(architecture)
-  ) {
-    throw new Error("unsupported Forge platform or architecture");
-  }
+  assertPlatformArchitecture(platform, architecture);
   return {
     buildDirectory: resolve(buildDirectory),
     platform,
@@ -159,6 +153,11 @@ const safeStage = async (source, destination, platform) => {
 export const stageCompanion = async (options) => {
   const identity = await readIdentity();
   const source = await findCompanion(options.buildDirectory, options.platform);
+  await verifyBinaryArchitecture(
+    source,
+    options.platform,
+    options.architecture,
+  );
   await verifyCompanion(source, identity);
 
   const executable =
@@ -172,6 +171,11 @@ export const stageCompanion = async (options) => {
     executable,
   );
   await safeStage(source, destination, options.platform);
+  await verifyBinaryArchitecture(
+    destination,
+    options.platform,
+    options.architecture,
+  );
   await verifyCompanion(destination, identity);
   return destination;
 };

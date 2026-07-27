@@ -5,7 +5,9 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import { verifyBinaryArchitecture } from "./lib/binary-inspection.mjs";
 import { verifyCompanion } from "./lib/companion-handshake.mjs";
+import { assertPlatformArchitecture } from "./lib/platform.mjs";
 
 const runCapture = async (command, arguments_) =>
   new Promise((resolvePromise, rejectPromise) => {
@@ -35,6 +37,101 @@ const runCapture = async (command, arguments_) =>
 const normalizedForComparison = (value, platform) =>
   platform === "win32" ? value.replaceAll("\\", "/").toLowerCase() : value;
 
+const LINUX_SYSTEM_LIBRARY =
+  /^(?:ld-(?:linux|musl)[^/]*\.so(?:\.[0-9]+)*|lib(?:c|dl|gcc_s|m|pthread|rt|stdc\+\+)\.so(?:\.[0-9]+)*)$/;
+const WINDOWS_SYSTEM_LIBRARIES = new Set([
+  "advapi32.dll",
+  "bcrypt.dll",
+  "crypt32.dll",
+  "iphlpapi.dll",
+  "kernel32.dll",
+  "ntdll.dll",
+  "ole32.dll",
+  "oleaut32.dll",
+  "shell32.dll",
+  "shlwapi.dll",
+  "user32.dll",
+  "ws2_32.dll",
+]);
+
+const validateLinuxDependencies = (output) => {
+  let dependencyCount = 0;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
+    if (/^linux-vdso\.so\.1\s+\(0x[0-9a-f]+\)$/i.test(line)) {
+      dependencyCount += 1;
+      continue;
+    }
+    const directLoader = line.match(/^(\/\S+)\s+\(0x[0-9a-f]+\)$/i);
+    if (directLoader !== null) {
+      const name = directLoader[1].split("/").at(-1);
+      if (
+        !/^\/(?:lib|lib64|usr\/lib|usr\/lib64)\//.test(directLoader[1]) ||
+        !LINUX_SYSTEM_LIBRARY.test(name)
+      ) {
+        throw new Error("native artifact has a non-system Linux dependency");
+      }
+      dependencyCount += 1;
+      continue;
+    }
+    const resolved = line.match(/^(\S+)\s+=>\s+(\S+)\s+\(0x[0-9a-f]+\)$/i);
+    if (
+      resolved === null ||
+      !LINUX_SYSTEM_LIBRARY.test(resolved[1]) ||
+      !/^\/(?:lib|lib64|usr\/lib|usr\/lib64)\//.test(resolved[2])
+    ) {
+      throw new Error("native artifact has an unknown Linux dependency");
+    }
+    dependencyCount += 1;
+  }
+  if (dependencyCount === 0) {
+    throw new Error("ldd did not report any validated dependencies");
+  }
+};
+
+const validateWindowsDependencies = (output) => {
+  const dependencies = [...output.matchAll(/\b([A-Za-z0-9_.-]+\.dll)\b/gi)].map(
+    (match) => match[1].toLowerCase(),
+  );
+  if (dependencies.length === 0) {
+    throw new Error("dumpbin did not report any dependencies");
+  }
+  for (const dependency of dependencies) {
+    if (
+      !WINDOWS_SYSTEM_LIBRARIES.has(dependency) &&
+      !dependency.startsWith("api-ms-win-") &&
+      !dependency.startsWith("ext-ms-win-")
+    ) {
+      throw new Error(`native artifact has an unknown Windows dependency`);
+    }
+  }
+};
+
+const validateMacDependencies = (output) => {
+  let dependencyCount = 0;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.endsWith(":")) {
+      continue;
+    }
+    const dependency = line.match(/^(\S+)\s+\(compatibility version /)?.[1];
+    if (
+      dependency === undefined ||
+      (!dependency.startsWith("/usr/lib/") &&
+        !dependency.startsWith("/System/Library/"))
+    ) {
+      throw new Error("native artifact has a non-system macOS dependency");
+    }
+    dependencyCount += 1;
+  }
+  if (dependencyCount === 0) {
+    throw new Error("otool did not report any validated dependencies");
+  }
+};
+
 export const validateDependencyReport = ({
   platform,
   output,
@@ -43,9 +140,6 @@ export const validateDependencyReport = ({
 }) => {
   if (!["darwin", "linux", "win32"].includes(platform)) {
     throw new Error("unsupported dependency report platform");
-  }
-  if (platform === "linux" && /\bnot found\b/i.test(output)) {
-    throw new Error("native artifact has an unresolved Linux dependency");
   }
   const normalizedOutput = normalizedForComparison(output, platform);
   const normalizedBuild = normalizedForComparison(
@@ -64,6 +158,16 @@ export const validateDependencyReport = ({
       "native artifact depends on a checkout or CMake build-tree library",
     );
   }
+  if (platform === "linux") {
+    if (/\bnot found\b/i.test(output)) {
+      throw new Error("native artifact has an unresolved Linux dependency");
+    }
+    validateLinuxDependencies(output);
+  } else if (platform === "win32") {
+    validateWindowsDependencies(output);
+  } else {
+    validateMacDependencies(output);
+  }
 };
 
 const readIdentity = async () => {
@@ -79,27 +183,13 @@ const readIdentity = async () => {
   return { appVersion: packageJson.version, coreSnapshot };
 };
 
-const verifyMacArchitecture = (output, architecture) => {
-  const hasX64 = /\bx86_64\b/.test(output);
-  const hasArm64 = /\barm64\b/.test(output);
-  if (
-    (architecture === "universal" && !(hasX64 && hasArm64)) ||
-    (architecture === "x64" && !hasX64) ||
-    (architecture === "arm64" && !hasArm64)
-  ) {
-    throw new Error(
-      "macOS companion does not contain the requested architecture",
-    );
-  }
-};
-
 export const checkNativeArtifact = async ({
   platform,
   architecture,
   executable,
   buildDirectory,
-  verifySignature = false,
 }) => {
+  assertPlatformArchitecture(platform, architecture);
   const binary = resolve(executable);
   const build = resolve(buildDirectory);
   const metadata = await lstat(binary);
@@ -128,13 +218,6 @@ export const checkNativeArtifact = async ({
     dependencyOutput = await runCapture("dumpbin", ["/dependents", binary]);
   } else if (platform === "darwin") {
     dependencyOutput = await runCapture("otool", ["-L", binary]);
-    verifyMacArchitecture(
-      await runCapture("lipo", ["-info", binary]),
-      architecture,
-    );
-    if (verifySignature) {
-      await runCapture("codesign", ["--verify", "--deep", "--strict", binary]);
-    }
   } else {
     throw new Error("unsupported native artifact platform");
   }
@@ -143,6 +226,7 @@ export const checkNativeArtifact = async ({
     output: dependencyOutput,
     buildDirectory: build,
   });
+  await verifyBinaryArchitecture(binary, platform, architecture);
   await verifyCompanion(binary, await readIdentity());
 };
 
@@ -158,9 +242,6 @@ const main = async () => {
     architecture,
     executable,
     buildDirectory,
-    verifySignature:
-      platform === "darwin" &&
-      process.env.NETFT_VIEWER_MACOS_SIGNING_ENABLED === "true",
   });
 };
 

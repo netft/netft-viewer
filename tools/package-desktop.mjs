@@ -1,7 +1,17 @@
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
+
+import { packageDirectoryPath } from "./lib/artifact-layout.mjs";
+import {
+  assertFreshPackageArguments,
+  cleanTargetOutputs,
+  macSignatureCommands,
+  runPackagingLifecycle,
+} from "./lib/packaging-lifecycle.mjs";
+import { assertNativeTarget } from "./lib/platform.mjs";
 
 const require = createRequire(import.meta.url);
 const forgePackage = require.resolve("@electron-forge/cli/package.json");
@@ -53,20 +63,12 @@ const extractTarget = (arguments_) => {
   }
   platform ??= process.platform;
   architecture ??= platform === "darwin" ? "universal" : process.arch;
-  if (!["darwin", "linux", "win32"].includes(platform)) {
-    throw new Error("unsupported Forge platform");
-  }
-  if (!["arm64", "x64", "universal"].includes(architecture)) {
-    throw new Error("unsupported Forge architecture");
-  }
-  if (platform !== process.platform) {
-    throw new Error(
-      "desktop artifacts must be built on their native operating system",
-    );
-  }
-  if (architecture === "universal" && platform !== "darwin") {
-    throw new Error("universal artifacts are supported only on macOS");
-  }
+  assertNativeTarget({
+    hostPlatform: process.platform,
+    hostArchitecture: process.arch,
+    targetPlatform: platform,
+    targetArchitecture: architecture,
+  });
   return { platform, architecture, remaining };
 };
 
@@ -98,6 +100,9 @@ const prepareNativeCompanion = async (platform, architecture) => {
   ];
   if (platform === "darwin" && architecture === "universal") {
     configure.push("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64");
+  }
+  if (platform === "win32") {
+    configure.push("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
   }
   await run("cmake", configure);
   await run("cmake", [
@@ -136,32 +141,83 @@ const main = async () => {
     );
   }
   const target = extractTarget(arguments_);
-  await prepareNativeCompanion(target.platform, target.architecture);
-  await run(
-    process.execPath,
-    [
-      forgeCli,
-      command,
-      "--platform",
-      target.platform,
-      "--arch",
-      target.architecture,
-      ...target.remaining,
-    ],
-    {
-      env: {
-        ...process.env,
-        NETFT_VIEWER_FORGE_PLATFORM: target.platform,
-        NETFT_VIEWER_FORGE_ARCHITECTURE: target.architecture,
-      },
+  assertFreshPackageArguments(target.remaining);
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const outDirectory = resolve("out");
+  const packageDirectory = packageDirectoryPath({
+    outDirectory,
+    platform: target.platform,
+    architecture: target.architecture,
+  });
+  await runPackagingLifecycle({
+    clean: () =>
+      cleanTargetOutputs({
+        outDirectory,
+        platform: target.platform,
+        architecture: target.architecture,
+        version: packageJson.version,
+      }),
+    prepare: () => prepareNativeCompanion(target.platform, target.architecture),
+    forge: async () => {
+      await run(
+        process.execPath,
+        [
+          forgeCli,
+          command,
+          "--platform",
+          target.platform,
+          "--arch",
+          target.architecture,
+          ...target.remaining,
+        ],
+        {
+          env: {
+            ...process.env,
+            NETFT_VIEWER_FORGE_PLATFORM: target.platform,
+            NETFT_VIEWER_FORGE_ARCHITECTURE: target.architecture,
+          },
+        },
+      );
+      if (command === "make" && target.platform === "linux") {
+        await run(process.execPath, [
+          "tools/make-portable.mjs",
+          packageDirectory,
+        ]);
+      }
     },
-  );
-  if (command === "make" && target.platform === "linux") {
-    await run(process.execPath, [
-      "tools/make-portable.mjs",
-      resolve(`out/Net F-T Viewer-linux-${target.architecture}`),
-    ]);
-  }
+    verifyPackage: () =>
+      run(process.execPath, [
+        "tools/verify-package-layout.mjs",
+        packageDirectory,
+        target.platform,
+        target.architecture,
+      ]),
+    verifySignature: async () => {
+      if (
+        target.platform !== "darwin" ||
+        (process.env.NETFT_VIEWER_MACOS_SIGN_IDENTITY?.length ?? 0) === 0
+      ) {
+        return;
+      }
+      const application = join(packageDirectory, "Net F-T Viewer.app");
+      for (const {
+        command: signatureCommand,
+        arguments: signatureArguments,
+      } of macSignatureCommands(application)) {
+        await run(signatureCommand, signatureArguments);
+      }
+    },
+    verifyArtifacts: async () => {
+      if (command === "make") {
+        await run(process.execPath, [
+          "tools/verify-package-artifacts.mjs",
+          target.platform,
+          target.architecture,
+          outDirectory,
+        ]);
+      }
+    },
+  });
 };
 
 main().catch((error) => {
