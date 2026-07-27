@@ -14,10 +14,10 @@ The reproducible development environment uses [Pixi](https://pixi.sh/) and inclu
 
 ```bash
 pixi install
-pnpm install --frozen-lockfile
+pixi run pnpm install --frozen-lockfile
 pixi run native-configure
 pixi run native-build
-pnpm run start
+pixi run pnpm run start
 ```
 
 You may also provide the exact tools directly. Linux packaging additionally needs `fakeroot`, `dpkg-dev`, and `patchelf`. Windows builds use the Visual Studio C++ toolchain. macOS builds require Xcode command-line tools; signing and notarization are release-maintainer concerns and are not required for local development.
@@ -28,11 +28,11 @@ Run the checks relevant to your change while developing and the complete local g
 
 ```bash
 pixi run format-check
-pnpm run lint
-pnpm run typecheck
-pnpm run test
-pnpm run test:e2e
-pnpm run package
+pixi run pnpm run lint
+pixi run pnpm run typecheck
+pixi run pnpm run test
+pixi run pnpm run test:e2e
+pixi run pnpm run package
 ```
 
 Native changes should also pass the sanitizer build used in CI. Hardware access is never part of the ordinary test suite. Maintainers run `tools/hardware-test.sh` only with an explicitly provided `NETFT_SENSOR_HOST`; Bias needs a second deliberate opt-in and safety confirmation.
