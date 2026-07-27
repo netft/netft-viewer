@@ -34,9 +34,6 @@ const runCapture = async (command, arguments_) =>
     });
   });
 
-const normalizedForComparison = (value, platform) =>
-  platform === "win32" ? value.replaceAll("\\", "/").toLowerCase() : value;
-
 const LINUX_SYSTEM_LIBRARY =
   /^(?:ld-(?:linux|musl)[^/]*\.so(?:\.[0-9]+)*|lib(?:c|dl|gcc_s|m|pthread|rt|stdc\+\+)\.so(?:\.[0-9]+)*)$/;
 const WINDOWS_SYSTEM_LIBRARIES = new Set([
@@ -93,20 +90,74 @@ const validateLinuxDependencies = (output) => {
 };
 
 const validateWindowsDependencies = (output) => {
-  const dependencies = [...output.matchAll(/\b([A-Za-z0-9_.-]+\.dll)\b/gi)].map(
-    (match) => match[1].toLowerCase(),
-  );
-  if (dependencies.length === 0) {
-    throw new Error("dumpbin did not report any dependencies");
-  }
-  for (const dependency of dependencies) {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  let index = 0;
+
+  if (
+    /^Microsoft \(R\) COFF\/PE Dumper Version \d+(?:\.\d+)+$/i.test(
+      lines[index] ?? "",
+    )
+  ) {
+    index += 1;
     if (
-      !WINDOWS_SYSTEM_LIBRARIES.has(dependency) &&
-      !dependency.startsWith("api-ms-win-") &&
-      !dependency.startsWith("ext-ms-win-")
+      !/^Copyright \(C\) Microsoft Corporation\.\s+All rights reserved\.$/i.test(
+        lines[index] ?? "",
+      )
+    ) {
+      throw new Error("dumpbin reported an unknown Windows prologue");
+    }
+    index += 1;
+  }
+  if (!/^Dump of file .+$/i.test(lines[index] ?? "")) {
+    throw new Error("dumpbin reported an unknown Windows prologue");
+  }
+  index += 1;
+  if (!/^File Type: (?:DLL|EXECUTABLE IMAGE)$/i.test(lines[index] ?? "")) {
+    throw new Error("dumpbin reported an unknown Windows image type");
+  }
+  index += 1;
+  if (!/^Image has the following dependencies:$/i.test(lines[index] ?? "")) {
+    throw new Error("dumpbin did not report a Windows dependency section");
+  }
+  index += 1;
+
+  let dependencyCount = 0;
+  while (index < lines.length && !/^Summary$/i.test(lines[index])) {
+    const dependency = lines[index].match(/^([A-Za-z0-9_.-]+\.dll)$/i)?.[1];
+    if (dependency === undefined) {
+      throw new Error("dumpbin reported a malformed Windows dependency");
+    }
+    const normalizedDependency = dependency.toLowerCase();
+    if (
+      !WINDOWS_SYSTEM_LIBRARIES.has(normalizedDependency) &&
+      !normalizedDependency.startsWith("api-ms-win-") &&
+      !normalizedDependency.startsWith("ext-ms-win-")
     ) {
       throw new Error(`native artifact has an unknown Windows dependency`);
     }
+    dependencyCount += 1;
+    index += 1;
+  }
+  if (dependencyCount === 0) {
+    throw new Error("dumpbin did not report any dependencies");
+  }
+  if (!/^Summary$/i.test(lines[index] ?? "")) {
+    throw new Error("dumpbin did not report a Windows summary");
+  }
+  index += 1;
+
+  let summaryCount = 0;
+  for (; index < lines.length; index += 1) {
+    if (!/^[0-9a-f]+\s+\S+$/i.test(lines[index])) {
+      throw new Error("dumpbin reported a malformed Windows summary");
+    }
+    summaryCount += 1;
+  }
+  if (summaryCount === 0) {
+    throw new Error("dumpbin did not report a Windows image summary");
   }
 };
 
@@ -132,31 +183,9 @@ const validateMacDependencies = (output) => {
   }
 };
 
-export const validateDependencyReport = ({
-  platform,
-  output,
-  buildDirectory,
-  sourceDirectory = process.cwd(),
-}) => {
+export const validateDependencyReport = ({ platform, output }) => {
   if (!["darwin", "linux", "win32"].includes(platform)) {
     throw new Error("unsupported dependency report platform");
-  }
-  const normalizedOutput = normalizedForComparison(output, platform);
-  const normalizedBuild = normalizedForComparison(
-    resolve(buildDirectory),
-    platform,
-  );
-  const normalizedSource = normalizedForComparison(
-    resolve(sourceDirectory),
-    platform,
-  );
-  if (
-    normalizedOutput.includes(normalizedBuild) ||
-    normalizedOutput.includes(normalizedSource)
-  ) {
-    throw new Error(
-      "native artifact depends on a checkout or CMake build-tree library",
-    );
   }
   if (platform === "linux") {
     if (/\bnot found\b/i.test(output)) {

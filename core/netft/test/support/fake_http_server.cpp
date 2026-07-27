@@ -13,6 +13,19 @@ namespace {
 
 using netft::test::NativeSocket;
 
+int wait_for_readable(const NativeSocket socket) noexcept {
+  fd_set readable;
+  FD_ZERO(&readable);
+  FD_SET(socket, &readable);
+  timeval timeout{};
+  timeout.tv_usec = 50'000;
+#ifdef _WIN32
+  return ::select(0, &readable, nullptr, nullptr, &timeout);
+#else
+  return ::select(socket + 1, &readable, nullptr, nullptr, &timeout);
+#endif
+}
+
 void send_all(const NativeSocket socket, std::string_view data) noexcept {
   while (!data.empty()) {
     const auto sent = netft::test::send_socket(
@@ -69,9 +82,9 @@ struct FakeHttpServer::Impl {
       auto listener_to_close = listener;
       netft::test::close_socket(listener_to_close);
     }
-    const auto client = active_client.exchange(netft::test::kInvalidSocket);
-    if (netft::test::socket_is_valid(client)) {
-      netft::test::shutdown_socket(client);
+    {
+      std::lock_guard<std::mutex> lock(active_client_mutex);
+      netft::test::shutdown_socket(active_client);
     }
     if (worker.joinable()) {
       worker.join();
@@ -88,16 +101,19 @@ struct FakeHttpServer::Impl {
         }
         continue;
       }
-      active_client.store(client);
+      {
+        std::lock_guard<std::mutex> lock(active_client_mutex);
+        active_client = client;
+      }
       accepted_connections.fetch_add(1);
       if (stopping.load()) {
         netft::test::shutdown_socket(client);
       }
       handle_request(client);
-      auto expected_client = client;
-      static_cast<void>(active_client.compare_exchange_strong(
-          expected_client, netft::test::kInvalidSocket));
-      netft::test::close_socket(client);
+      {
+        std::lock_guard<std::mutex> lock(active_client_mutex);
+        netft::test::close_socket(active_client);
+      }
     }
   }
 
@@ -106,6 +122,16 @@ struct FakeHttpServer::Impl {
     char buffer[1024];
     while (request.size() < 8192 &&
            request.find("\r\n\r\n") == std::string::npos) {
+      if (stopping.load()) {
+        return;
+      }
+      const int readiness = wait_for_readable(client);
+      if (readiness < 0) {
+        return;
+      }
+      if (readiness == 0) {
+        continue;
+      }
       const auto received =
           netft::test::receive_socket(client, buffer, sizeof(buffer));
       if (received <= 0) {
@@ -163,7 +189,8 @@ struct FakeHttpServer::Impl {
   std::atomic<std::uint64_t> requests{0};
   std::atomic<std::uint64_t> accepted_connections{0};
   netft::test::SocketRuntime runtime;
-  std::atomic<NativeSocket> active_client{netft::test::kInvalidSocket};
+  std::mutex active_client_mutex;
+  NativeSocket active_client{netft::test::kInvalidSocket};
   NativeSocket listener{netft::test::kInvalidSocket};
   int listening_port{};
   std::thread worker;

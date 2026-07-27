@@ -146,6 +146,27 @@ test("native dependency reports fail closed against platform allowlists", async 
     buildDirectory: "/checkout/build/package",
     sourceDirectory: "/checkout",
   };
+  const windowsReport = [
+    "Microsoft (R) COFF/PE Dumper Version 14.44.35213.0",
+    "Copyright (C) Microsoft Corporation.  All rights reserved.",
+    "",
+    "Dump of file C:\\checkout\\build\\package\\netft-viewer-companion.exe",
+    "",
+    "File Type: EXECUTABLE IMAGE",
+    "",
+    "  Image has the following dependencies:",
+    "",
+    "    KERNEL32.dll",
+    "    WS2_32.dll",
+    "    api-ms-win-core-synch-l1-2-0.dll",
+    "",
+    "  Summary",
+    "",
+    "        1000 .data",
+    "        2000 .rdata",
+    "        1000 .reloc",
+    "        3000 .text",
+  ].join("\n");
 
   assert.doesNotThrow(() =>
     validateDependencyReport({
@@ -178,25 +199,33 @@ test("native dependency reports fail closed against platform allowlists", async 
     validateDependencyReport({
       ...context,
       platform: "win32",
-      output: [
-        "Image has the following dependencies:",
-        "KERNEL32.dll",
-        "WS2_32.dll",
-        "api-ms-win-core-synch-l1-2-0.dll",
-      ].join("\n"),
+      output: windowsReport,
     }),
   );
   for (const dependency of [
     "libcurl.dll",
     "VCRUNTIME140.dll",
     "unknown-plugin.dll",
+    "malicious_without_extension",
   ]) {
     assert.throws(() =>
       validateDependencyReport({
         ...context,
         platform: "win32",
-        output: `Image has the following dependencies:\n${dependency}`,
+        output: windowsReport.replace("KERNEL32.dll", dependency),
       }),
+    );
+  }
+  for (const output of [
+    windowsReport.replace("  Image has the following dependencies:", ""),
+    windowsReport.replace(
+      "Microsoft (R) COFF/PE Dumper Version 14.44.35213.0",
+      "unrecognized dumpbin prologue",
+    ),
+    windowsReport.replace("    KERNEL32.dll", "    KERNEL32.dll extra"),
+  ]) {
+    assert.throws(() =>
+      validateDependencyReport({ ...context, platform: "win32", output }),
     );
   }
 
@@ -205,7 +234,7 @@ test("native dependency reports fail closed against platform allowlists", async 
       ...context,
       platform: "darwin",
       output: [
-        "/tmp/netft-viewer-companion:",
+        "/checkout/build/package/netft-viewer-companion:",
         "/usr/lib/libc++.1.dylib (compatibility version 1.0.0)",
         "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0)",
       ].join("\n"),

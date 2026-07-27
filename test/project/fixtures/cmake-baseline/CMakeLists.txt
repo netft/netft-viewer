@@ -10,6 +10,9 @@ set(BUILD_TESTING ON CACHE BOOL "")
 
 include("${NETFT_VIEWER_SOURCE_DIR}/cmake/Dependencies.cmake")
 
+if(USE_LIBIDN2)
+  message(FATAL_ERROR "curl libidn2 support must remain disabled")
+endif()
 if(NOT BUILD_SHARED_LIBS)
   message(FATAL_ERROR "BUILD_SHARED_LIBS was not restored")
 endif()

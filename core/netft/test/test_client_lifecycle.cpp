@@ -126,6 +126,10 @@ struct ClientLifecycleTestAccess {
     return client.impl_->stopping_;
   }
 
+  static bool has_thread_factory(const netft::Client &client) {
+    return client.impl_->thread_factory_ != nullptr;
+  }
+
   static std::uint64_t generation(const netft::Client &client) {
     std::lock_guard<std::mutex> data_lock(client.impl_->data_mutex_);
     return client.impl_->generation_;
@@ -157,12 +161,13 @@ struct ClientLifecycleTestAccess {
 
 private:
   static std::thread create_thread(netft::Client::Impl *impl) {
-    if (fail_next.exchange(false)) {
-      throw std::system_error{
-          std::make_error_code(std::errc::resource_unavailable_try_again),
-          "injected thread creation failure"};
+    if (!fail_next.exchange(false)) {
+      std::terminate();
     }
-    return std::thread{&netft::Client::Impl::run, impl};
+    impl->thread_factory_ = nullptr;
+    throw std::system_error{
+        std::make_error_code(std::errc::resource_unavailable_try_again),
+        "injected thread creation failure"};
   }
 
   static void reset_gate(HookGate &gate) {
@@ -665,6 +670,7 @@ TEST(ClientLifecycle, ThreadCreationFailureRestoresPriorFaultedState) {
   EXPECT_TRUE(ClientLifecycleTestAccess::worker_exited(client));
   EXPECT_TRUE(ClientLifecycleTestAccess::has_callback(client));
   EXPECT_FALSE(ClientLifecycleTestAccess::stopping(client));
+  EXPECT_FALSE(ClientLifecycleTestAccess::has_thread_factory(client));
   EXPECT_EQ(ClientLifecycleTestAccess::generation(client), prior_generation);
   EXPECT_TRUE(client.wait_for_first_sample(10ms));
   client.stop();

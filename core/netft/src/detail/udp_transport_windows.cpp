@@ -153,17 +153,45 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
   if (wait_started_hook != nullptr) {
     wait_started_hook(wait_started_context);
   }
-  const int poll_result =
-      ::WSAPoll(&descriptor, 1, timeout_milliseconds(timeout));
-  if (poll_result == SOCKET_ERROR) {
-    const int error = ::WSAGetLastError();
-    if (error == WSAEINTR) {
+  const auto bounded_timeout =
+      std::max(timeout, std::chrono::duration<double>::zero());
+  const auto deadline = std::chrono::steady_clock::now() + bounded_timeout;
+  constexpr int kShutdownCheckIntervalMilliseconds = 50;
+  constexpr auto kShutdownCheckInterval =
+      std::chrono::milliseconds{kShutdownCheckIntervalMilliseconds};
+  for (;;) {
+    {
+      std::scoped_lock lock(mutex_);
+      if (shutdown_requested_) {
+        return 0;
+      }
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining = deadline - now;
+    const auto poll_timeout =
+        remaining > std::chrono::steady_clock::duration::zero()
+            ? std::min(std::chrono::duration<double>{remaining},
+                       std::chrono::duration<double>{kShutdownCheckInterval})
+            : std::chrono::duration<double>::zero();
+    descriptor.revents = 0;
+    const int poll_result =
+        ::WSAPoll(&descriptor, 1,
+                  std::min(kShutdownCheckIntervalMilliseconds,
+                           timeout_milliseconds(poll_timeout)));
+    if (poll_result == SOCKET_ERROR) {
+      const int error = ::WSAGetLastError();
+      if (error == WSAEINTR) {
+        return 0;
+      }
+      throw winsock_error("failed to wait for UDP record", error);
+    }
+    if (poll_result > 0) {
+      break;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
       return 0;
     }
-    throw winsock_error("failed to wait for UDP record", error);
-  }
-  if (poll_result == 0) {
-    return 0;
   }
   {
     std::scoped_lock lock(mutex_);

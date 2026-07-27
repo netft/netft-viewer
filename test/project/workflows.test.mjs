@@ -79,6 +79,19 @@ test("CI separates static checks, native tests, and packaged Linux E2E", async (
   assert.ok(e2eSteps.has("e2e-failure-artifacts"));
 });
 
+test("CI stops the PowerShell native build at the first failed command", async () => {
+  const workflow = await loadWorkflow("ci.yml");
+  const nativeTest = workflow.jobs.native.steps.find(
+    ({ id }) => id === "native-test",
+  );
+
+  assert.match(nativeTest.run, /\$ErrorActionPreference\s*=\s*"Stop"/);
+  assert.match(
+    nativeTest.run,
+    /\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true/,
+  );
+});
+
 test("CI installs the repository clang-format version before checking native sources", async () => {
   const workflow = await loadWorkflow("ci.yml");
   const versions = JSON.parse(
