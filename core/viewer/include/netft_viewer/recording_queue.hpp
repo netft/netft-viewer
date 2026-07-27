@@ -12,7 +12,7 @@ template <typename T, std::size_t Capacity> class RecordingQueue {
   static_assert(Capacity > 0, "RecordingQueue capacity must be positive");
   static_assert((Capacity & (Capacity - 1U)) == 0U,
                 "RecordingQueue capacity must be a power of two");
-  static_assert(Capacity <= std::numeric_limits<std::size_t>::max() / 2U,
+  static_assert(Capacity <= (std::numeric_limits<std::size_t>::max)() / 2U,
                 "RecordingQueue capacity is too large for wrap-safe counters");
   static_assert(std::is_trivially_copyable<T>::value,
                 "RecordingQueue values must be trivially copyable");
