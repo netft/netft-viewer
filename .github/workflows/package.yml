@@ -28,34 +28,21 @@ jobs:
             platform: linux
             architecture: x64
             artifact_name: netft-viewer-linux-x64
-            artifact_paths: |-
-              out/make/deb/x64/netft-viewer_0.1.0_amd64.deb
-              out/make/netft-viewer-0.1.0-linux-x64.tar.gz
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
             platform: linux
             architecture: arm64
             artifact_name: netft-viewer-linux-arm64
-            artifact_paths: |-
-              out/make/deb/arm64/netft-viewer_0.1.0_arm64.deb
-              out/make/netft-viewer-0.1.0-linux-arm64.tar.gz
           - name: Windows x64
             runner: windows-2025
             platform: win32
             architecture: x64
             artifact_name: netft-viewer-windows-x64
-            artifact_paths: |-
-              out/make/squirrel.windows/x64/NetFTViewerSetup.exe
-              out/make/squirrel.windows/x64/netft_viewer-0.1.0-full.nupkg
-              out/make/zip/win32/x64/Net F-T Viewer-win32-x64-0.1.0.zip
           - name: macOS universal
             runner: macos-15
             platform: darwin
             architecture: universal
             artifact_name: netft-viewer-macos-universal
-            artifact_paths: |-
-              out/make/Net F-T Viewer.dmg
-              out/make/zip/darwin/universal/Net F-T Viewer-darwin-universal-0.1.0.zip
     steps:
       - id: checkout
         uses: actions/checkout@v7
@@ -90,12 +77,6 @@ jobs:
       - id: make
         name: Build native installers
         shell: pwsh
-        env:
-          NETFT_VIEWER_MACOS_SIGN_IDENTITY: ${{ matrix.platform == 'darwin' && secrets.MACOS_SIGN_IDENTITY || '' }}
-          NETFT_VIEWER_MACOS_NOTARIZE: ${{ matrix.platform == 'darwin' && secrets.MACOS_SIGN_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_ID_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && 'true' || 'false' }}
-          NETFT_VIEWER_APPLE_ID: ${{ matrix.platform == 'darwin' && secrets.APPLE_ID || '' }}
-          NETFT_VIEWER_APPLE_ID_PASSWORD: ${{ matrix.platform == 'darwin' && secrets.APPLE_ID_PASSWORD || '' }}
-          NETFT_VIEWER_APPLE_TEAM_ID: ${{ matrix.platform == 'darwin' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           if ($IsWindows) {
             $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -103,14 +84,150 @@ jobs:
             Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
             Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           }
-          pnpm make --platform "${{ matrix.platform }}" --arch "${{ matrix.architecture }}"
+          pnpm run make -- --platform "${{ matrix.platform }}" --arch "${{ matrix.architecture }}"
       - id: verify-artifacts
         name: Verify installer contents and native companion
         run: node tools/verify-package-artifacts.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
+      - id: artifact-manifest
+        name: Resolve artifact paths
+        run: node tools/write-artifact-manifest.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
       - id: upload
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_paths }}
+          path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
           if-no-files-found: error
           retention-days: 14
+
+  signed-macos:
+    name: Package / macOS universal signed
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - id: signing-preflight
+        name: Validate signing configuration
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          configured=0
+          values=(
+            "$MACOS_CERTIFICATE_P12"
+            "$MACOS_CERTIFICATE_PASSWORD"
+            "$MACOS_SIGN_IDENTITY"
+            "$APPLE_ID"
+            "$APPLE_ID_PASSWORD"
+            "$APPLE_TEAM_ID"
+          )
+          for value in "${values[@]}"; do
+            if [[ -n "$value" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+          if [[ "$configured" -eq 0 ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$configured" -ne "${#values[@]}" ]]; then
+            echo "::error::macOS signing secrets must be configured all together" >&2
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - id: checkout
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: import-certificate
+        name: Import signing certificate
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          signing_keychain="$RUNNER_TEMP/netft-viewer-signing.keychain-db"
+          signing_certificate="$RUNNER_TEMP/netft-viewer-signing.p12"
+          signing_keychain_password="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          export NETFT_VIEWER_SIGNING_KEYCHAIN="$signing_keychain"
+          export NETFT_VIEWER_SIGNING_CERTIFICATE="$signing_certificate"
+          echo "NETFT_VIEWER_SIGNING_KEYCHAIN=$signing_keychain" >> "$GITHUB_ENV"
+          echo "NETFT_VIEWER_SIGNING_CERTIFICATE=$signing_certificate" >> "$GITHUB_ENV"
+          python -c 'import base64, os, pathlib; pathlib.Path(os.environ["NETFT_VIEWER_SIGNING_CERTIFICATE"]).write_bytes(base64.b64decode(os.environ["MACOS_CERTIFICATE_P12"]))'
+          security create-keychain -p "$signing_keychain_password" "$signing_keychain"
+          security set-keychain-settings -lut 21600 "$signing_keychain"
+          security unlock-keychain -p "$signing_keychain_password" "$signing_keychain"
+          security import "$signing_certificate" \
+            -k "$signing_keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$signing_keychain_password" \
+            "$signing_keychain"
+          security list-keychains -d user -s \
+            "$signing_keychain" \
+            "$HOME/Library/Keychains/login.keychain-db"
+      - id: toolchain
+        name: Verify packaging toolchain
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        run: |
+          cmake --version
+          ninja --version
+          node --version
+      - id: pnpm
+        name: Bootstrap pnpm
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        run: npm install --global --ignore-scripts pnpm@11.17.0
+      - id: node
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - id: install
+        name: Install dependencies
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        run: pnpm install --frozen-lockfile
+      - id: make
+        name: Build, sign, and notarize installers
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        env:
+          NETFT_VIEWER_MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NETFT_VIEWER_MACOS_NOTARIZE: "true"
+          NETFT_VIEWER_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NETFT_VIEWER_APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          NETFT_VIEWER_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm run make -- --platform darwin --arch universal
+      - id: verify-artifacts
+        name: Verify signed installer contents
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        run: node tools/verify-package-artifacts.mjs darwin universal out
+      - id: artifact-manifest
+        name: Resolve artifact paths
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        run: node tools/write-artifact-manifest.mjs darwin universal out
+      - id: upload
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: netft-viewer-macos-universal-signed
+          path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14
+      - id: cleanup-keychain
+        name: Remove temporary signing material
+        if: always() && steps.signing-preflight.outputs.enabled == 'true'
+        run: |
+          if [[ -n "${NETFT_VIEWER_SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$NETFT_VIEWER_SIGNING_KEYCHAIN" || true
+          fi
+          if [[ -n "${NETFT_VIEWER_SIGNING_CERTIFICATE:-}" ]]; then
+            rm -f "$NETFT_VIEWER_SIGNING_CERTIFICATE"
+          fi

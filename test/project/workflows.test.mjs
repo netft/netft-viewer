@@ -64,6 +64,7 @@ test("CI separates static checks, native tests, and packaged Linux E2E", async (
       "checkout",
       "node",
       "pnpm",
+      "clang-format",
       "install",
       "format",
       "lint",
@@ -76,6 +77,55 @@ test("CI separates static checks, native tests, and packaged Linux E2E", async (
   assert.ok(nativeSteps.has("companion-test"));
   assert.ok(e2eSteps.has("packaged-e2e"));
   assert.ok(e2eSteps.has("e2e-failure-artifacts"));
+});
+
+test("CI installs the repository clang-format version before checking native sources", async () => {
+  const workflow = await loadWorkflow("ci.yml");
+  const versions = JSON.parse(
+    await readFile(
+      new URL("../../tools/tool-versions.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const pixi = await readFile(
+    new URL("../../pixi.toml", import.meta.url),
+    "utf8",
+  );
+  const qualityStepIds = workflow.jobs.quality.steps.map(({ id }) => id);
+  const steps = new Map(
+    workflow.jobs.quality.steps.map((step) => [step.id, step]),
+  );
+
+  assert.equal(versions.clangFormat, "22.1.8");
+  assert.match(pixi, /clang-format = "==22\.1\.8"/);
+  assert.ok(
+    qualityStepIds.indexOf("clang-format") < qualityStepIds.indexOf("format"),
+  );
+  assert.match(steps.get("clang-format").run, /tools\/tool-versions\.json/);
+  assert.match(
+    steps.get("clang-format").run,
+    /python -m pip install[\s\S]*clang-format==\$CLANG_FORMAT_VERSION/,
+  );
+  assert.match(steps.get("clang-format").run, /clang-format --version/);
+  assert.match(steps.get("format").run, /clang-format --dry-run --Werror/);
+});
+
+test("CI runs the native suite with address and undefined behavior sanitizers", async () => {
+  const workflow = await loadWorkflow("ci.yml");
+  const sanitizer = workflow.jobs.sanitizers;
+
+  assert.equal(sanitizer["runs-on"], "ubuntu-24.04");
+  assert.ok(sanitizer["timeout-minutes"] > 0);
+  const steps = new Map(sanitizer.steps.map((step) => [step.id, step]));
+  assert.match(steps.get("sanitizer-test").run, /NETFT_VIEWER_SANITIZERS=ON/);
+  assert.match(steps.get("sanitizer-test").run, /\bctest\b/);
+  assert.equal(steps.get("sanitizer-test").env.CC, "clang");
+  assert.equal(steps.get("sanitizer-test").env.CXX, "clang++");
+  assert.match(steps.get("sanitizer-test").env.ASAN_OPTIONS, /detect_leaks=1/);
+  assert.match(
+    steps.get("sanitizer-test").env.UBSAN_OPTIONS,
+    /halt_on_error=1/,
+  );
 });
 
 test("CI uses least privilege, bounded concurrency, Node 24, and immutable dependency installs", async () => {
@@ -155,6 +205,13 @@ test("coverage uploads independent native and frontend reports without percentag
     assert.ok(upload.with.files);
     assert.ok(job["timeout-minutes"] > 0);
   }
+  const frontendSteps = new Map(
+    workflow.jobs.frontend.steps.map((step) => [step.id, step]),
+  );
+  assert.match(
+    frontendSteps.get("coverage").run,
+    /test -s coverage\/frontend\/lcov\.info/,
+  );
 });
 
 test("project coverage commands generate native XML and frontend LCOV reports", async () => {
@@ -191,26 +248,44 @@ test("package workflow builds and verifies artifacts on native runners", async (
 
   const steps = new Map(packageJob.steps.map((step) => [step.id, step]));
   assert.ok(steps.has("make"));
+  assert.match(
+    steps.get("make").run,
+    /pnpm run make -- --platform "\$\{\{ matrix\.platform \}\}"/,
+  );
   assert.ok(steps.has("verify-artifacts"));
+  assert.equal(
+    steps.get("upload").with.path,
+    "${{ steps.artifact-manifest.outputs.artifact_paths }}",
+  );
   assert.equal(steps.get("upload").uses, "actions/upload-artifact@v7");
   assert.equal(steps.get("upload").with["if-no-files-found"], "error");
+  assert.equal(JSON.stringify(workflow).includes("0.1.0"), false);
+});
 
-  const artifactPaths = packageJob.strategy.matrix.include
-    .flatMap(({ artifact_paths: paths }) => paths.split(/\r?\n/))
-    .filter(Boolean);
-  for (const suffix of [
-    ".deb",
-    ".tar.gz",
-    "Setup.exe",
-    ".nupkg",
-    ".zip",
-    ".dmg",
-  ]) {
-    assert.ok(
-      artifactPaths.some((path) => path.endsWith(suffix)),
-      `missing uploaded ${suffix} artifact`,
-    );
-  }
+test("macOS signing is isolated to protected tag jobs and temporary keychains", async () => {
+  const workflow = await loadWorkflow("package.yml");
+  const unsigned = workflow.jobs.package;
+  const signed = workflow.jobs["signed-macos"];
+
+  assert.equal(JSON.stringify(unsigned).includes("secrets."), false);
+  assert.match(signed.if, /refs\/tags\/v/);
+  assert.equal(signed.environment, "release");
+  const steps = new Map(signed.steps.map((step) => [step.id, step]));
+  assert.ok(steps.has("signing-preflight"));
+  assert.ok(steps.has("import-certificate"));
+  assert.match(steps.get("import-certificate").run, /security import/);
+  assert.match(steps.get("import-certificate").run, /security create-keychain/);
+  assert.ok(steps.has("toolchain"));
+  assert.match(
+    steps.get("make").run,
+    /pnpm run make -- --platform darwin --arch universal/,
+  );
+  assert.equal(steps.get("cleanup-keychain").if.includes("always()"), true);
+  assert.match(steps.get("cleanup-keychain").run, /security delete-keychain/);
+  assert.equal(
+    steps.get("upload").with.path,
+    "${{ steps.artifact-manifest.outputs.artifact_paths }}",
+  );
 });
 
 test("all JavaScript actions use the selected Node 24-compatible major versions", async () => {

@@ -82,7 +82,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - id: coverage
         name: Generate frontend coverage
-        run: pnpm test:coverage:frontend
+        run: |
+          pnpm test:coverage:frontend
+          test -s coverage/frontend/lcov.info
       - id: upload
         uses: codecov/codecov-action@v7
         with:

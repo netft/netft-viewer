@@ -12,9 +12,10 @@ python = "3.12.*"
 pytest = ">=8,<10"
 cmake = ">=3.21"
 ninja = "*"
-clang = "*"
-clangxx = "*"
-clang-tools = "*"
+clang = "==22.1.8"
+clangxx = "==22.1.8"
+clang-tools = "==22.1.8"
+clang-format = "==22.1.8"
 pkg-config = "*"
 
 [target.linux-64.dependencies]
