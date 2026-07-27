@@ -19,6 +19,13 @@ import {
 } from "../../app/renderer/model/app-state";
 
 const commandOk = async () => ({ success: true });
+const deferredCommand = () => {
+  let resolve!: (value: { success: boolean }) => void;
+  const promise = new Promise<{ success: boolean }>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+};
 const DEFAULT_PREFERENCES: Preferences = {
   sensorHost: "192.168.1.1",
   plotMode: "combined",
@@ -283,6 +290,82 @@ describe("fixed sensor sidebar", () => {
     fireEvent.click(screen.getByTestId("connection-action"));
 
     expect(api.connect).toHaveBeenCalledWith("sensor.example");
+  });
+
+  it("cancels a pending connection command when the backend epoch changes", async () => {
+    const pending = deferredCommand();
+    const { api, emit } = installApi();
+    vi.mocked(api.connect).mockReturnValue(pending.promise);
+    render(<App initialPreferences={DEFAULT_PREFERENCES} />);
+
+    act(() => {
+      emit({
+        type: "backend_state",
+        monotonicNs: "1",
+        payload: { state: "running", startAttempts: 1 },
+      });
+    });
+    fireEvent.click(screen.getByTestId("connection-action"));
+    expect(
+      (screen.getByTestId("connection-action") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    act(() => {
+      emit({
+        type: "backend_disconnected",
+        monotonicNs: "2",
+        payload: { restartPending: true },
+      });
+      emit({
+        type: "backend_state",
+        monotonicNs: "3",
+        payload: { state: "running", startAttempts: 2 },
+      });
+    });
+
+    expect(
+      (screen.getByTestId("connection-action") as HTMLButtonElement).disabled,
+    ).toBe(false);
+    await act(async () => {
+      pending.resolve({ success: true });
+      await pending.promise;
+    });
+    expect(
+      (screen.getByTestId("connection-action") as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("cancels a pending connection command at a connection generation boundary", () => {
+    const pending = deferredCommand();
+    const { api, emit } = installApi();
+    vi.mocked(api.connect).mockReturnValue(pending.promise);
+    render(<App initialPreferences={DEFAULT_PREFERENCES} />);
+
+    act(() => {
+      emit({
+        type: "backend_state",
+        monotonicNs: "1",
+        payload: { state: "running", startAttempts: 1 },
+      });
+    });
+    fireEvent.click(screen.getByTestId("connection-action"));
+    act(() => {
+      emit({
+        protocol: { major: 1, minor: 0 },
+        type: "connection_state",
+        monotonicNs: "2",
+        payload: {
+          state: "disconnected",
+          paused: false,
+          generation: "2",
+          lastError: "",
+        },
+      });
+    });
+
+    expect(
+      (screen.getByTestId("connection-action") as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("subscribes and cleans up safely under StrictMode", () => {

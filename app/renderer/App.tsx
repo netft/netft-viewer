@@ -33,6 +33,30 @@ export interface AppProps {
   initialPreferences?: Preferences;
 }
 
+interface ConnectionScope {
+  backendEpoch: string;
+  connectionGeneration: string;
+}
+
+interface PendingConnection {
+  commandComplete: boolean;
+  kind: "connect" | "disconnect";
+  scope: ConnectionScope;
+  token: number;
+}
+
+const connectionScope = (state: ReturnType<typeof createInitialAppState>) => ({
+  backendEpoch: state.backend.lastMonotonicNs,
+  connectionGeneration: state.connectionGeneration,
+});
+
+const sameConnectionScope = (
+  left: ConnectionScope,
+  right: ConnectionScope,
+): boolean =>
+  left.backendEpoch === right.backendEpoch &&
+  left.connectionGeneration === right.connectionGeneration;
+
 const mergePreferences = (
   preferences: Preferences,
   patch: PreferencesPatch,
@@ -55,9 +79,8 @@ export const App = ({ initialPreferences }: AppProps) => {
   const stateRef = useRef(state);
   stateRef.current = state;
   const [connectionPending, setConnectionPending] = useState(false);
-  const connectionPendingRef = useRef<
-    { kind: "connect" | "disconnect"; commandComplete: boolean } | undefined
-  >(undefined);
+  const connectionPendingRef = useRef<PendingConnection | undefined>(undefined);
+  const connectionTokenRef = useRef(0);
   const hydratedPreferencesRef = useRef(initialPreferences !== undefined);
   const pendingPreferencesRef = useRef<PreferencesPatch>({});
   const preferenceTimerRef = useRef<number | undefined>(undefined);
@@ -196,9 +219,26 @@ export const App = ({ initialPreferences }: AppProps) => {
   const changeHost = useCallback((sensorHost: string) => {
     dispatch({ type: "sensor_host_changed", sensorHost });
   }, []);
+  const clearConnectionPending = useCallback((token?: number): void => {
+    const pending = connectionPendingRef.current;
+    if (
+      pending !== undefined &&
+      (token === undefined || pending.token === token)
+    ) {
+      connectionPendingRef.current = undefined;
+      setConnectionPending(false);
+    }
+  }, []);
   const completeConnectionIfAuthoritative = useCallback((): void => {
     const pending = connectionPendingRef.current;
     if (pending === undefined || !pending.commandComplete) {
+      return;
+    }
+    if (
+      stateRef.current.backend.state !== "running" ||
+      !sameConnectionScope(pending.scope, connectionScope(stateRef.current))
+    ) {
+      clearConnectionPending(pending.token);
       return;
     }
     const reached =
@@ -206,21 +246,43 @@ export const App = ({ initialPreferences }: AppProps) => {
         ? !["disconnected", "error"].includes(stateRef.current.connection)
         : stateRef.current.connection === "disconnected";
     if (reached) {
-      connectionPendingRef.current = undefined;
-      setConnectionPending(false);
+      clearConnectionPending(pending.token);
     }
-  }, []);
+  }, [clearConnectionPending]);
 
   useEffect(() => {
+    const pending = connectionPendingRef.current;
+    if (
+      pending !== undefined &&
+      (state.backend.state !== "running" ||
+        !sameConnectionScope(pending.scope, connectionScope(state)))
+    ) {
+      clearConnectionPending(pending.token);
+      return;
+    }
     completeConnectionIfAuthoritative();
-  }, [completeConnectionIfAuthoritative, state.connection]);
+  }, [
+    clearConnectionPending,
+    completeConnectionIfAuthoritative,
+    state.backend.lastMonotonicNs,
+    state.backend.state,
+    state.connection,
+    state.connectionGeneration,
+  ]);
 
   const runConnection = useCallback(
     (kind: "connect" | "disconnect"): void => {
       if (connectionPendingRef.current !== undefined) {
         return;
       }
-      connectionPendingRef.current = { kind, commandComplete: false };
+      const token = ++connectionTokenRef.current;
+      const scope = connectionScope(stateRef.current);
+      connectionPendingRef.current = {
+        kind,
+        commandComplete: false,
+        scope,
+        token,
+      };
       setConnectionPending(true);
       const request =
         kind === "connect"
@@ -229,23 +291,27 @@ export const App = ({ initialPreferences }: AppProps) => {
       void request
         .then((result) => {
           const pending = connectionPendingRef.current;
-          if (pending?.kind !== kind) {
+          if (
+            pending?.kind !== kind ||
+            pending.token !== token ||
+            !sameConnectionScope(scope, connectionScope(stateRef.current)) ||
+            stateRef.current.backend.state !== "running"
+          ) {
+            clearConnectionPending(token);
             return;
           }
           if (!result.success) {
-            connectionPendingRef.current = undefined;
-            setConnectionPending(false);
+            clearConnectionPending(token);
             return;
           }
           pending.commandComplete = true;
           completeConnectionIfAuthoritative();
         })
         .catch(() => {
-          connectionPendingRef.current = undefined;
-          setConnectionPending(false);
+          clearConnectionPending(token);
         });
     },
-    [completeConnectionIfAuthoritative],
+    [clearConnectionPending, completeConnectionIfAuthoritative],
   );
   const connect = useCallback(() => {
     runConnection("connect");
