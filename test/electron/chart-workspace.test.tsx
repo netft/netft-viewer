@@ -34,6 +34,23 @@ const plotBatch = (hostTimeNs: string): PlotBatchEvent => ({
   },
 });
 
+const configurationChanged = (
+  revision: string,
+): Extract<RendererEvent, { type: "configuration_changed" }> => ({
+  protocol: { major: 1, minor: 0 },
+  type: "configuration_changed",
+  monotonicNs: revision,
+  payload: {
+    productName: "ATI",
+    countsPerForceUnit: 1_000_000,
+    countsPerTorqueUnit: 1_000,
+    forceUnit: revision === "1" ? "N" : "lbf",
+    torqueUnit: revision === "1" ? "N-mm" : "lbf-in",
+    source: "sensor",
+    revision,
+  },
+});
+
 const stateWithPlot = (
   hostTimeNs = "1000000000",
   generation = "1",
@@ -243,6 +260,31 @@ describe("ChartWorkspace", () => {
         theme="light"
       />,
     );
+    expect(screen.getByTestId("chart-workspace").dataset.pointCount).toBe("0");
+  });
+
+  it("clears cached points at a configuration-revision boundary", () => {
+    const runtime = new TestRuntime();
+    let sink: ((event: RendererEvent) => void) | undefined;
+    render(
+      <ChartWorkspace
+        registerEventSink={(nextSink) => {
+          sink = nextSink;
+          return () => {
+            sink = undefined;
+          };
+        }}
+        runtime={runtime}
+        state={stateWithPlot()}
+        theme="light"
+      />,
+    );
+    expect(screen.getByTestId("chart-workspace").dataset.pointCount).toBe("6");
+
+    act(() => {
+      sink?.(configurationChanged("2"));
+    });
+
     expect(screen.getByTestId("chart-workspace").dataset.pointCount).toBe("0");
   });
 

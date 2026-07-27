@@ -29,6 +29,12 @@ std::optional<PlotBatch> PlotAggregator::push(const TimedSample &sample) {
     return std::nullopt;
   }
 
+  if (sample.sample.configuration_revision != configuration_revision_) {
+    reset();
+    seed_interval(sample);
+    return std::nullopt;
+  }
+
   if (sample.monotonic_time_ns < last_monotonic_time_ns_) {
     return std::nullopt;
   }
@@ -50,12 +56,14 @@ void PlotAggregator::reset() noexcept {
   interval_start_ns_ = 0;
   last_monotonic_time_ns_ = 0;
   next_sample_index_ = 0;
+  configuration_revision_ = 0;
 }
 
 void PlotAggregator::seed_interval(const TimedSample &sample) noexcept {
   has_interval_ = true;
   interval_start_ns_ = sample.monotonic_time_ns;
   last_monotonic_time_ns_ = sample.monotonic_time_ns;
+  configuration_revision_ = sample.sample.configuration_revision;
   for (const auto axis : axes) {
     const Candidate candidate{sample.host_time_ns, sample.monotonic_time_ns,
                               axis_value(sample.sample, axis),

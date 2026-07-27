@@ -59,6 +59,7 @@ private:
   std::array<AxisCandidates, axes.size()> candidates_{};
   std::int64_t interval_start_ns_{};
   std::int64_t last_monotonic_time_ns_{};
+  std::uint64_t configuration_revision_{};
   std::uint64_t next_sample_index_{};
   bool has_interval_{};
 };

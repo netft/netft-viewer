@@ -275,6 +275,7 @@ public:
       health_.rdt_port = config.rdt_port;
       accepting_samples_ = true;
       has_streamed_ = false;
+      published_configuration_revision_ = 0U;
       recording_failure_reported_ = false;
     }
     events_.activate_generation(generation);
@@ -509,6 +510,7 @@ public:
 
 private:
   void sample_received(std::uint64_t generation, const netft::Sample &sample) {
+    bool configuration_required = false;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       if (generation != connection_.generation || !accepting_samples_) {
@@ -516,9 +518,20 @@ private:
       }
       ++active_callbacks_;
       sample_revision_.fetch_add(1U, std::memory_order_release);
+      configuration_required =
+          published_configuration_revision_ != sample.configuration_revision;
     }
 
     try {
+      std::optional<netft::SensorConfiguration> sample_configuration;
+      if (configuration_required) {
+        const auto client_health = client_->health();
+        if (client_health.sensor_configuration &&
+            client_health.sensor_configuration->revision ==
+                sample.configuration_revision) {
+          sample_configuration = client_health.sensor_configuration;
+        }
+      }
       TimedSample timed{sample, clock_->host_now_ns(),
                         clock_->monotonic_now_ns()};
       const auto submit_result = recorder_->submit(sample);
@@ -527,6 +540,15 @@ private:
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         if (generation == connection_.generation && accepting_samples_) {
+          if (sample_configuration) {
+            configuration_ = std::move(sample_configuration);
+          }
+          if (configuration_ &&
+              configuration_->revision == sample.configuration_revision &&
+              published_configuration_revision_ !=
+                  sample.configuration_revision) {
+            publish_configuration_locked(generation, *configuration_);
+          }
           latest_ = timed;
           has_streamed_ = true;
           if (connection_.state != ConnectionState::Streaming) {
@@ -591,7 +613,6 @@ private:
       return;
     }
 
-    std::optional<netft::SensorConfiguration> changed_configuration;
     std::optional<ConnectionSnapshot> changed_connection;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -603,7 +624,10 @@ private:
           (!configuration_ ||
            configuration_->revision != health.sensor_configuration->revision)) {
         configuration_ = health.sensor_configuration;
-        changed_configuration = configuration_;
+      }
+      if (configuration_ &&
+          configuration_->revision != published_configuration_revision_) {
+        publish_configuration_locked(generation, *configuration_);
       }
       auto mapped = connection_state_for(health.state);
       const auto revision_now =
@@ -633,9 +657,6 @@ private:
     }
     if (changed_connection) {
       events_.push(generation, *changed_connection);
-    }
-    if (changed_configuration) {
-      events_.push(generation, *changed_configuration);
     }
     events_.push(generation, std::move(health));
     publish_periodic_recording(generation);
@@ -669,6 +690,20 @@ private:
     events_.push(generation, recorder_->snapshot());
   }
 
+  void publish_configuration_locked(
+      std::uint64_t generation,
+      const netft::SensorConfiguration &configuration) {
+    if (published_configuration_revision_ != 0U) {
+      events_.revoke_measurements();
+      events_.purge_measurements(generation);
+      if (!events_.begin_measurements()) {
+        return;
+      }
+    }
+    published_configuration_revision_ = configuration.revision;
+    events_.push(generation, configuration);
+  }
+
   void publish_periodic_recording(std::uint64_t generation) {
     auto snapshot = recorder_->snapshot();
     if (snapshot.state != RecordingState::Idle) {
@@ -700,6 +735,7 @@ private:
   netft::HealthSnapshot health_;
   std::optional<TimedSample> latest_;
   std::optional<netft::SensorConfiguration> configuration_;
+  std::uint64_t published_configuration_revision_{};
   bool accepting_samples_{};
   bool has_streamed_{};
   std::size_t active_callbacks_{};

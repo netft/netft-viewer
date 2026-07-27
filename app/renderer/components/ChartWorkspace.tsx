@@ -140,6 +140,7 @@ export interface ChartWorkspaceProps {
 
 interface SessionBoundary {
   backendEpoch: string;
+  configurationRevision: string;
   connectionGeneration: string;
   connection: AppState["connection"];
   paused: boolean;
@@ -150,6 +151,7 @@ const sameSessionBoundary = (
   right: SessionBoundary,
 ): boolean =>
   left.backendEpoch === right.backendEpoch &&
+  left.configurationRevision === right.configurationRevision &&
   left.connectionGeneration === right.connectionGeneration &&
   left.connection === right.connection &&
   left.paused === right.paused;
@@ -173,6 +175,7 @@ export const ChartWorkspace = ({
   );
   const boundary: SessionBoundary = {
     backendEpoch: state.backend.lastMonotonicNs,
+    configurationRevision: state.configuration.revision,
     connectionGeneration: state.connectionGeneration,
     connection: state.connection,
     paused: state.paused,
@@ -193,6 +196,7 @@ export const ChartWorkspace = ({
         case "backend_disconnected":
           previousBoundaryRef.current = {
             backendEpoch: event.monotonicNs,
+            configurationRevision: "0",
             connectionGeneration: "0",
             connection: "disconnected",
             paused: false,
@@ -202,6 +206,10 @@ export const ChartWorkspace = ({
         case "backend_state":
           previousBoundaryRef.current = {
             backendEpoch: event.monotonicNs,
+            configurationRevision:
+              event.payload.state === "running"
+                ? current.configurationRevision
+                : "0",
             connectionGeneration:
               event.payload.state === "running"
                 ? current.connectionGeneration
@@ -231,6 +239,15 @@ export const ChartWorkspace = ({
           }
           return;
         }
+        case "configuration_changed":
+          if (event.payload.revision !== current.configurationRevision) {
+            previousBoundaryRef.current = {
+              ...current,
+              configurationRevision: event.payload.revision,
+            };
+            resetModel();
+          }
+          return;
         case "plot_batch":
           if (current.connection !== "streaming" || current.paused) {
             return;
@@ -279,7 +296,8 @@ export const ChartWorkspace = ({
     previousBoundaryRef.current = boundary;
     const sessionChanged =
       previous.backendEpoch !== boundary.backendEpoch ||
-      previous.connectionGeneration !== boundary.connectionGeneration;
+      previous.connectionGeneration !== boundary.connectionGeneration ||
+      previous.configurationRevision !== boundary.configurationRevision;
     const measurementUnavailable =
       boundary.connection !== "streaming" || boundary.paused;
     if (sessionChanged || measurementUnavailable) {

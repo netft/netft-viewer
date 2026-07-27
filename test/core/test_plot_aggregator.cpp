@@ -17,13 +17,15 @@ namespace {
 using namespace std::chrono_literals;
 
 TimedSample timed_sample(std::chrono::milliseconds timestamp,
-                         const std::array<double, 6> &values) {
+                         const std::array<double, 6> &values,
+                         std::uint64_t configuration_revision = 1U) {
   TimedSample timed;
   timed.host_time_ns =
       std::chrono::duration_cast<std::chrono::nanoseconds>(timestamp).count();
   timed.monotonic_time_ns = timed.host_time_ns;
   timed.sample.force = {values[0], values[1], values[2]};
   timed.sample.torque = {values[3], values[4], values[5]};
+  timed.sample.configuration_revision = configuration_revision;
   return timed;
 }
 
@@ -158,6 +160,21 @@ TEST(PlotAggregatorTest, ResetDropsTheCurrentInterval) {
   EXPECT_FALSE(
       aggregator.push(timed_sample(20ms, axis_values(3.0))).has_value());
   const auto batch = aggregator.push(timed_sample(53ms, axis_values(4.0)));
+  ASSERT_TRUE(batch.has_value());
+  EXPECT_EQ(values_for(*batch, Axis::Fx), (std::vector<double>{3.0}));
+}
+
+TEST(PlotAggregatorTest, ConfigurationRevisionStartsANewEmptyInterval) {
+  PlotAggregator aggregator(33ms);
+  ASSERT_FALSE(
+      aggregator.push(timed_sample(0ms, axis_values(1.0), 1U)).has_value());
+  ASSERT_FALSE(
+      aggregator.push(timed_sample(10ms, axis_values(2.0), 1U)).has_value());
+
+  EXPECT_FALSE(
+      aggregator.push(timed_sample(40ms, axis_values(3.0), 2U)).has_value());
+  const auto batch = aggregator.push(timed_sample(73ms, axis_values(4.0), 2U));
+
   ASSERT_TRUE(batch.has_value());
   EXPECT_EQ(values_for(*batch, Axis::Fx), (std::vector<double>{3.0}));
 }

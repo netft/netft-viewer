@@ -372,6 +372,70 @@ TEST(ViewerSessionTest, ConfigurationRevisionChangesArePublished) {
   }));
 }
 
+TEST(ViewerSessionTest, ConfigurationPrecedesTheFirstSampleOfItsRevision) {
+  netft::test::FakeSensor sensor;
+  SessionEventSink events;
+  auto session_options = options();
+  session_options.health_interval = 1s;
+  ViewerSession session(events, session_options);
+  auto config = config_for(sensor);
+  config.receive_timeout = 80ms;
+  sensor.pause();
+  sensor.set_http_response_delay(100ms);
+
+  ASSERT_EQ(session.connect(config), SessionResult::Ok);
+  ASSERT_TRUE(sensor.wait_for_command(netft::detail::Command::StartRealtime));
+  sensor.send_record_now(1U, 0U, 104U);
+
+  bool matching_configuration_seen = false;
+  bool sample_seen = false;
+  const auto deadline = std::chrono::steady_clock::now() + 1s;
+  while (!sample_seen && std::chrono::steady_clock::now() < deadline) {
+    auto read = events.wait_for_event(20ms);
+    ASSERT_NE(read.status, SessionEventReadStatus::Closed);
+    if (read.status != SessionEventReadStatus::Event) {
+      continue;
+    }
+    if (const auto *configuration =
+            std::get_if<netft::SensorConfiguration>(&read.event->payload)) {
+      matching_configuration_seen = configuration->revision == 1U;
+    } else if (const auto *sample =
+                   std::get_if<TimedSample>(&read.event->payload)) {
+      if (sample->sample.configuration_revision == 1U) {
+        EXPECT_TRUE(matching_configuration_seen);
+        sample_seen = true;
+      }
+    }
+  }
+  EXPECT_TRUE(sample_seen);
+
+  sensor.set_xml_configuration(changed_configuration);
+  ASSERT_TRUE(sensor.wait_for_http_request(2U, 1s));
+  sensor.resume();
+
+  matching_configuration_seen = false;
+  sample_seen = false;
+  const auto changed_deadline = std::chrono::steady_clock::now() + 1s;
+  while (!sample_seen && std::chrono::steady_clock::now() < changed_deadline) {
+    auto read = events.wait_for_event(20ms);
+    ASSERT_NE(read.status, SessionEventReadStatus::Closed);
+    if (read.status != SessionEventReadStatus::Event) {
+      continue;
+    }
+    if (const auto *configuration =
+            std::get_if<netft::SensorConfiguration>(&read.event->payload)) {
+      matching_configuration_seen = configuration->revision == 2U;
+    } else if (const auto *sample =
+                   std::get_if<TimedSample>(&read.event->payload)) {
+      if (sample->sample.configuration_revision == 2U) {
+        EXPECT_TRUE(matching_configuration_seen);
+        sample_seen = true;
+      }
+    }
+  }
+  EXPECT_TRUE(sample_seen);
+}
+
 TEST(ViewerSessionTest, DisconnectClearsPauseAndCancelsConnectingGeneration) {
   netft::test::FakeSensor first;
   netft::test::FakeSensor second;
