@@ -250,8 +250,9 @@ test("package workflow builds and verifies artifacts on native runners", async (
   assert.ok(steps.has("make"));
   assert.match(
     steps.get("make").run,
-    /pnpm run make -- --platform "\$\{\{ matrix\.platform \}\}"/,
+    /pnpm run make --platform "\$\{\{ matrix\.platform \}\}"/,
   );
+  assert.equal(steps.get("make").run.includes("make -- --platform"), false);
   assert.ok(steps.has("verify-artifacts"));
   assert.equal(
     steps.get("upload").with.path,
@@ -269,16 +270,21 @@ test("macOS signing is isolated to protected tag jobs and temporary keychains", 
 
   assert.equal(JSON.stringify(unsigned).includes("secrets."), false);
   assert.match(signed.if, /refs\/tags\/v/);
+  assert.match(signed.if, /vars\.MACOS_SIGNING_ENABLED == 'true'/);
   assert.equal(signed.environment, "release");
   const steps = new Map(signed.steps.map((step) => [step.id, step]));
   assert.ok(steps.has("signing-preflight"));
+  assert.equal(
+    steps.get("signing-preflight").run.includes("enabled=false"),
+    false,
+  );
   assert.ok(steps.has("import-certificate"));
   assert.match(steps.get("import-certificate").run, /security import/);
   assert.match(steps.get("import-certificate").run, /security create-keychain/);
   assert.ok(steps.has("toolchain"));
   assert.match(
     steps.get("make").run,
-    /pnpm run make -- --platform darwin --arch universal/,
+    /pnpm run make --platform darwin --arch universal/,
   );
   assert.equal(steps.get("cleanup-keychain").if.includes("always()"), true);
   assert.match(steps.get("cleanup-keychain").run, /security delete-keychain/);

@@ -84,7 +84,7 @@ jobs:
             Import-Module "$installation\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
             Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
           }
-          pnpm run make -- --platform "${{ matrix.platform }}" --arch "${{ matrix.architecture }}"
+          pnpm run make --platform "${{ matrix.platform }}" --arch "${{ matrix.architecture }}"
       - id: verify-artifacts
         name: Verify installer contents and native companion
         run: node tools/verify-package-artifacts.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
@@ -101,7 +101,7 @@ jobs:
 
   signed-macos:
     name: Package / macOS universal signed
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.MACOS_SIGNING_ENABLED == 'true'
     environment: release
     runs-on: macos-15
     timeout-minutes: 75
@@ -130,9 +130,7 @@ jobs:
               configured=$((configured + 1))
             fi
           done
-          if [[ "$configured" -eq 0 ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          elif [[ "$configured" -ne "${#values[@]}" ]]; then
+          if [[ "$configured" -ne "${#values[@]}" ]]; then
             echo "::error::macOS signing secrets must be configured all together" >&2
             exit 1
           else
@@ -204,7 +202,7 @@ jobs:
           NETFT_VIEWER_APPLE_ID: ${{ secrets.APPLE_ID }}
           NETFT_VIEWER_APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           NETFT_VIEWER_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm run make -- --platform darwin --arch universal
+        run: pnpm run make --platform darwin --arch universal
       - id: verify-artifacts
         name: Verify signed installer contents
         if: steps.signing-preflight.outputs.enabled == 'true'

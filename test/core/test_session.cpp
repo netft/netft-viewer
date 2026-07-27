@@ -214,8 +214,12 @@ TEST(ViewerSessionTest, PauseDrainsRecordingAndDoesNotReplayMeasurements) {
   ASSERT_EQ(session.start_recording("session-pause.csv", false),
             SessionResult::Ok);
   sensor.send_record_now(2U, 0U, 108U);
-  ASSERT_TRUE(sink.wait(
-      [&] { return session.snapshot().recording.accepted_samples == 1U; }));
+  ASSERT_TRUE(sink.wait([&] {
+    const auto snapshot = session.snapshot();
+    return snapshot.recording.accepted_samples == 1U &&
+           snapshot.latest_sample &&
+           snapshot.latest_sample->sample.rdt_sequence == 2U;
+  }));
   ASSERT_EQ(session.set_paused(true), SessionResult::Ok);
   const auto paused = session.snapshot();
   EXPECT_TRUE(paused.connection.paused);
