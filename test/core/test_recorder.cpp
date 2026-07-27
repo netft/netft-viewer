@@ -94,6 +94,10 @@ std::vector<std::string> split_csv_row(const std::string &line) {
   return fields;
 }
 
+TEST(RecorderTest, KeepsAPlatformSafeStackFootprint) {
+  EXPECT_LT(sizeof(Recorder), 64U * 1024U);
+}
+
 TEST(RecorderTest, PauseDrainsAndResumeLeavesSequenceAndTimestampGap) {
   TestDirectory directory;
   const auto clock = std::make_shared<FixedRecorderClock>();

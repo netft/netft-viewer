@@ -246,6 +246,9 @@ test("project coverage commands generate native XML and frontend LCOV reports", 
 test("package workflow builds and verifies artifacts on native runners", async () => {
   const workflow = await loadWorkflow("package.yml");
   const packageJob = workflow.jobs.package;
+  const packageJson = JSON.parse(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  );
 
   assert.deepEqual(
     matrixTargets(packageJob),
@@ -273,6 +276,7 @@ test("package workflow builds and verifies artifacts on native runners", async (
   );
   assert.equal(steps.get("upload").uses, "actions/upload-artifact@v7");
   assert.equal(steps.get("upload").with["if-no-files-found"], "error");
+  assert.equal(packageJson.devDependencies.lodash, "4.18.1");
   assert.equal(JSON.stringify(workflow).includes("0.1.0"), false);
 });
 

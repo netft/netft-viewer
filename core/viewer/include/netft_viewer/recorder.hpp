@@ -120,7 +120,9 @@ private:
   RecorderOptions options_;
   std::shared_ptr<RecorderClock> clock_;
   std::shared_ptr<RecorderStorage> storage_;
-  RecordingQueue<RecordedSample, recording_queue_capacity> queue_;
+  std::unique_ptr<RecordingQueue<RecordedSample, recording_queue_capacity>>
+      queue_{std::make_unique<
+          RecordingQueue<RecordedSample, recording_queue_capacity>>()};
   detail::SubmissionGate submission_gate_;
 
   std::atomic<RecordingState> state_{RecordingState::Idle};

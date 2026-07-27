@@ -404,7 +404,7 @@ SubmitResult Recorder::submit(const netft::Sample &sample) noexcept {
 
   const auto recorded = make_recorded_sample(sample, recording_steady_origin_,
                                              recording_system_origin_);
-  if (!queue_.try_push(recorded)) {
+  if (!queue_->try_push(recorded)) {
     submission_gate_.close();
     enter_overflow_error();
     entry.release();
@@ -498,8 +498,8 @@ RecorderSnapshot Recorder::snapshot() const {
   result.accepted_samples = accepted_samples_.load(std::memory_order_relaxed);
   result.written_samples = written_samples_.load(std::memory_order_relaxed);
   result.bytes_written = bytes_written_.load(std::memory_order_relaxed);
-  result.queue_size = queue_.size();
-  result.queue_capacity = queue_.capacity();
+  result.queue_size = queue_->size();
+  result.queue_capacity = queue_->capacity();
   {
     std::lock_guard<std::mutex> metadata_lock(metadata_mutex_);
     result.partial_path = partial_path_;
@@ -605,7 +605,7 @@ void Recorder::writer_loop_impl() {
     } else {
       writer_condition_.wait_until(wait_lock, next_flush, [&] {
         const auto state = state_.load(std::memory_order_acquire);
-        return queue_.size() != 0U || state == RecordingState::Pausing ||
+        return queue_->size() != 0U || state == RecordingState::Pausing ||
                state == RecordingState::Stopping ||
                state == RecordingState::Error;
       });
@@ -624,7 +624,7 @@ void Recorder::publish_writer_done() {
 bool Recorder::write_available_batch() {
   std::array<RecordedSample, writer_batch_size> batch{};
   std::size_t count{};
-  while (count < batch.size() && queue_.try_pop(batch[count])) {
+  while (count < batch.size() && queue_->try_pop(batch[count])) {
     ++count;
   }
   if (count == 0U) {
@@ -753,12 +753,12 @@ void Recorder::finish_error_file() noexcept {
 
 void Recorder::discard_queued_samples() noexcept {
   RecordedSample ignored;
-  while (queue_.try_pop(ignored)) {
+  while (queue_->try_pop(ignored)) {
   }
 }
 
 bool Recorder::drain_complete() const noexcept {
-  return detail::drain_complete(submission_gate_, queue_);
+  return detail::drain_complete(submission_gate_, *queue_);
 }
 
 } // namespace netft_viewer

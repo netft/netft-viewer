@@ -8,6 +8,8 @@ import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
+import { removeMacCodeSignatures } from "./tools/lib/mac-signature-sanitizer.mjs";
+
 const e2eBuild = process.env.NETFT_VIEWER_E2E_BUILD === "true";
 const forgePlatform =
   process.env.NETFT_VIEWER_FORGE_PLATFORM ?? process.platform;
@@ -53,6 +55,25 @@ const config = {
     appCategoryType: "public.app-category.utilities",
     executableName: "netft-viewer",
     icon,
+    afterExtract: [
+      (
+        buildPath: string,
+        _electronVersion: string,
+        platform: string,
+        _architecture: string,
+        callback: (error?: Error | null) => void,
+      ) => {
+        removeMacCodeSignatures(buildPath, platform).then(
+          () => callback(),
+          (error: unknown) =>
+            callback(
+              error instanceof Error
+                ? error
+                : new Error("failed to remove macOS code signatures"),
+            ),
+        );
+      },
+    ],
     osxUniversal: {
       mergeASARs: true,
     },

@@ -65,6 +65,7 @@
     "ajv": "8.17.1",
     "electron": "43.2.0",
     "jsdom": "29.1.1",
+    "lodash": "4.18.1",
     "pnpm": "11.17.0",
     "prettier": "3.9.6",
     "typescript": "7.0.2",
