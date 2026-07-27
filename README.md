@@ -43,10 +43,10 @@ To build from source, first [install Pixi](https://pixi.prefix.dev/latest/instal
 
 ```bash
 pixi install
-pnpm install --frozen-lockfile
+pixi run pnpm install --frozen-lockfile
 pixi run native-configure
 pixi run native-build
-pnpm run start
+pixi run pnpm run start
 ```
 
 ## Connect to a sensor
