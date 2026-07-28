@@ -1,0 +1,379 @@
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+
+import type { CommandResult } from "../../main/companion-supervisor";
+import type { NetftApi } from "../../preload";
+import type { MenuCommand } from "../../shared/menu-contract";
+import type { AppState } from "../model/app-state";
+
+type PendingAction = "pause" | "bias" | "record" | "stop";
+
+interface ActionScope {
+  backendEpoch: string;
+  connectionGeneration: string;
+}
+
+interface PendingEntry {
+  commandComplete: boolean;
+  expectedState?:
+    | { kind: "paused"; value: boolean }
+    | { kind: "recording_active" }
+    | { kind: "recording_idle" };
+  scope: ActionScope;
+  token: number;
+}
+
+interface ActionFeedback {
+  action: PendingAction;
+  errorCode?: string;
+  result: "success" | "error";
+}
+
+export interface ActionsProps {
+  api: Pick<
+    NetftApi,
+    "setPaused" | "requestBias" | "startRecording" | "stopRecording"
+  >;
+  disabled?: boolean;
+  onPendingChange?: (pending: boolean) => void;
+  onError?: (errorCode: string) => void;
+  registerMenuHandler?: (handler: (command: MenuCommand) => void) => () => void;
+  state: AppState;
+}
+
+const isRecordingActive = (state: AppState): boolean =>
+  !["idle", "error"].includes(state.recording.state);
+
+const safeErrorCode = (result: CommandResult): string =>
+  result.errorCode?.slice(0, 64).replace(/[^A-Za-z0-9_.:-]/g, "") ||
+  "command_failed";
+
+const scopeFromState = (state: AppState): ActionScope => ({
+  backendEpoch: state.backend.lastMonotonicNs,
+  connectionGeneration: state.connectionGeneration,
+});
+
+const sameScope = (left: ActionScope, right: ActionScope): boolean =>
+  left.backendEpoch === right.backendEpoch &&
+  left.connectionGeneration === right.connectionGeneration;
+
+const scopeIsLive = (scope: ActionScope, state: AppState): boolean =>
+  sameScope(scope, scopeFromState(state)) &&
+  state.backend.state === "running" &&
+  state.connection === "streaming";
+
+const expectedStateReached = (
+  expected: PendingEntry["expectedState"],
+  state: AppState,
+): boolean => {
+  if (expected === undefined) {
+    return true;
+  }
+  switch (expected.kind) {
+    case "paused":
+      return state.paused === expected.value;
+    case "recording_active":
+      return !["idle", "error"].includes(state.recording.state);
+    case "recording_idle":
+      return ["idle", "error"].includes(state.recording.state);
+  }
+};
+
+const ActionsView = ({
+  api,
+  disabled = false,
+  onPendingChange,
+  onError,
+  registerMenuHandler,
+  state,
+}: ActionsProps) => {
+  const pendingRef = useRef(new Map<PendingAction, PendingEntry>());
+  const tokenRef = useRef(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const previousScopeRef = useRef(scopeFromState(state));
+  const [pendingRevision, setPendingRevision] = useState(0);
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
+  const streaming =
+    state.backend.state === "running" && state.connection === "streaming";
+  const recordingActive = isRecordingActive(state);
+
+  const rerenderPending = useCallback(() => {
+    setPendingRevision((revision) => revision + 1);
+  }, []);
+
+  const removePending = useCallback(
+    (action: PendingAction, token?: number): void => {
+      const entry = pendingRef.current.get(action);
+      if (
+        entry !== undefined &&
+        (token === undefined || entry.token === token) &&
+        pendingRef.current.delete(action)
+      ) {
+        rerenderPending();
+      }
+    },
+    [rerenderPending],
+  );
+
+  const run = useCallback(
+    (
+      action: PendingAction,
+      command: () => Promise<CommandResult>,
+      expectedState?: PendingEntry["expectedState"],
+    ): void => {
+      if (pendingRef.current.has(action)) {
+        return;
+      }
+      setFeedback(null);
+      const token = ++tokenRef.current;
+      const scope = scopeFromState(stateRef.current);
+      pendingRef.current.set(action, {
+        commandComplete: false,
+        expectedState,
+        scope,
+        token,
+      });
+      rerenderPending();
+      void command()
+        .then((result) => {
+          const entry = pendingRef.current.get(action);
+          if (
+            entry === undefined ||
+            entry.token !== token ||
+            !sameScope(entry.scope, scope) ||
+            !scopeIsLive(scope, stateRef.current)
+          ) {
+            return;
+          }
+          if (!result.success) {
+            removePending(action, token);
+            if (result.errorCode !== "cancelled") {
+              const code = safeErrorCode(result);
+              setFeedback({ action, errorCode: code, result: "error" });
+              onError?.(code);
+            }
+            return;
+          }
+          entry.commandComplete = true;
+          if (expectedStateReached(entry.expectedState, stateRef.current)) {
+            removePending(action, token);
+            if (action === "bias") {
+              setFeedback({ action, result: "success" });
+            }
+          }
+        })
+        .catch(() => {
+          const entry = pendingRef.current.get(action);
+          if (
+            entry?.token === token &&
+            sameScope(entry.scope, scope) &&
+            scopeIsLive(scope, stateRef.current)
+          ) {
+            removePending(action, token);
+            setFeedback({
+              action,
+              errorCode: "command_unavailable",
+              result: "error",
+            });
+            onError?.("command_unavailable");
+          }
+        });
+    },
+    [onError, removePending, rerenderPending],
+  );
+
+  useEffect(() => {
+    const currentScope = scopeFromState(state);
+    const sessionEnded =
+      !sameScope(previousScopeRef.current, currentScope) ||
+      state.backend.state !== "running" ||
+      state.connection !== "streaming";
+    previousScopeRef.current = currentScope;
+    if (sessionEnded) {
+      if (pendingRef.current.size > 0) {
+        pendingRef.current.clear();
+        rerenderPending();
+      }
+      setFeedback(null);
+      return;
+    }
+    for (const [action, entry] of pendingRef.current) {
+      if (
+        sameScope(entry.scope, currentScope) &&
+        entry.commandComplete &&
+        expectedStateReached(entry.expectedState, state)
+      ) {
+        removePending(action, entry.token);
+      }
+    }
+  }, [
+    removePending,
+    state.paused,
+    state.recording.state,
+    state.connection,
+    state.connectionGeneration,
+    state.backend.lastMonotonicNs,
+    state.backend.state,
+  ]);
+
+  const pending = pendingRef.current;
+  const pausePending = pending.has("pause");
+  const biasPending = pending.has("bias");
+  const recordPending = pending.has("record");
+  const stopPending = pending.has("stop");
+  const transitionPending =
+    pausePending || biasPending || recordPending || stopPending;
+  void pendingRevision;
+
+  const togglePause = useCallback((): void => {
+    const current = stateRef.current;
+    if (
+      disabled ||
+      current.backend.state !== "running" ||
+      current.connection !== "streaming" ||
+      pendingRef.current.size > 0
+    ) {
+      return;
+    }
+    const target = !current.paused;
+    run("pause", async () => api.setPaused(target), {
+      kind: "paused",
+      value: target,
+    });
+  }, [api, disabled, run]);
+  const requestBias = useCallback((): void => {
+    const current = stateRef.current;
+    if (
+      disabled ||
+      current.backend.state !== "running" ||
+      current.connection !== "streaming" ||
+      current.paused ||
+      pendingRef.current.size > 0
+    ) {
+      return;
+    }
+    run("bias", api.requestBias);
+  }, [api, disabled, run]);
+  const toggleRecording = useCallback((): void => {
+    const current = stateRef.current;
+    const active = isRecordingActive(current);
+    if (disabled || pendingRef.current.size > 0) {
+      return;
+    }
+    if (active) {
+      run("stop", api.stopRecording, { kind: "recording_idle" });
+      return;
+    }
+    if (
+      current.backend.state !== "running" ||
+      current.connection !== "streaming" ||
+      current.paused ||
+      current.recording.state === "error"
+    ) {
+      return;
+    }
+    run("record", api.startRecording, { kind: "recording_active" });
+  }, [api, disabled, run]);
+
+  useEffect(() => {
+    onPendingChange?.(transitionPending);
+  }, [onPendingChange, transitionPending]);
+
+  useEffect(() => {
+    if (registerMenuHandler === undefined) {
+      return;
+    }
+    return registerMenuHandler((command) => {
+      switch (command.type) {
+        case "toggle-pause":
+          togglePause();
+          return;
+        case "bias":
+          requestBias();
+          return;
+        case "toggle-recording":
+          toggleRecording();
+          return;
+        default:
+          return;
+      }
+    });
+  }, [registerMenuHandler, requestBias, togglePause, toggleRecording]);
+
+  return (
+    <>
+      <div className="measurement-actions" aria-label="Sensor actions">
+        <button
+          aria-busy={pausePending}
+          className="button button-secondary"
+          data-action={state.paused ? "resume" : "pause"}
+          data-testid="pause-action"
+          disabled={disabled || !streaming || transitionPending}
+          onClick={togglePause}
+          type="button"
+        >
+          {state.paused ? "Resume" : "Pause"}
+        </button>
+        <button
+          aria-busy={biasPending}
+          className="button button-secondary"
+          data-testid="bias-action"
+          disabled={disabled || !streaming || state.paused || transitionPending}
+          onClick={requestBias}
+          type="button"
+        >
+          Bias
+        </button>
+        {recordingActive ? (
+          <button
+            aria-busy={stopPending}
+            className="button button-danger-outline"
+            data-action="stop"
+            data-testid="recording-action"
+            disabled={disabled || stopPending}
+            onClick={toggleRecording}
+            type="button"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            aria-busy={recordPending}
+            className="button button-danger"
+            data-action="record"
+            data-testid="recording-action"
+            disabled={
+              disabled ||
+              !streaming ||
+              state.paused ||
+              transitionPending ||
+              state.recording.state === "error"
+            }
+            onClick={toggleRecording}
+            type="button"
+          >
+            Record
+          </button>
+        )}
+      </div>
+      {feedback !== null ? (
+        <output
+          className={
+            feedback.result === "error" ? "action-error" : "action-success"
+          }
+          data-action={feedback.action}
+          data-error-code={feedback.errorCode}
+          data-result={feedback.result}
+          aria-live="polite"
+          role="status"
+        >
+          {feedback.result === "success"
+            ? "Bias applied."
+            : "The action could not be completed. Check the status details."}
+        </output>
+      ) : null}
+    </>
+  );
+};
+
+export const Actions = memo(ActionsView);

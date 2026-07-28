@@ -1,0 +1,9 @@
+{"protocol":{"major":1,"minor":0},"type":"health","monotonicNs":"1"}
+{"protocol":{"major":2,"minor":0},"type":"error","monotonicNs":"2","payload":{"operation":"sensor","message":"x","sequence":"1","droppedBefore":"0"}}
+{"protocol":{"major":1,"minor":0},"type":"future_event","monotonicNs":"3","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"recording_progress","monotonicNs":"4","payload":{"acceptedSamples":"01","writtenSamples":"0","bytesWritten":"0","queueSize":"0","queueCapacity":"65536"}}
+{"protocol":{"major":1,"minor":0},"type":"plot_batch","monotonicNs":"5","payload":{"axes":[{"axis":"Fx","points":[{"hostTimeNs":"1","value":1},{"hostTimeNs":"2","value":2},{"hostTimeNs":"3","value":3},{"hostTimeNs":"4","value":4},{"hostTimeNs":"5","value":5}]},{"axis":"Fy","points":[]},{"axis":"Fz","points":[]},{"axis":"Tx","points":[]},{"axis":"Ty","points":[]},{"axis":"Tz","points":[]}]}}
+{"protocol":{"major":1,"minor":0},"type":"plot_batch","monotonicNs":"6","payload":{"axes":[{"axis":"Fx","points":[]},{"axis":"Fx","points":[]},{"axis":"Fz","points":[]},{"axis":"Tx","points":[]},{"axis":"Ty","points":[]},{"axis":"Tz","points":[]}]}}
+{"protocol":{"major":1,"minor":4294967296},"type":"error","monotonicNs":"7","payload":{"operation":"sensor","message":"x","sequence":"1","droppedBefore":"0"}}
+{"protocol":{"major":1,"minor":0},"type":"hello","requestId":"bad/request","monotonicNs":"8","payload":{"protocolMajor":1,"protocolMinor":0,"appVersion":"0.1.0","coreSnapshot":"e424c401587052f03de9b94f76f1e86b78902105"}}
+{"protocol":{"major":1,"minor":0},"type":"live_wrench","monotonicNs":"9","payload":{"hostTimeNs":"100","sampleMonotonicNs":"4","rdtSequence":1,"ftSequence":2,"status":0,"raw":[-2147483649,2147483648,3,4,5,6],"force":[1.0,2.0,3.0],"torque":[4.0,5.0,6.0],"forceUnit":"N","torqueUnit":"N-mm","configurationRevision":"1"}}

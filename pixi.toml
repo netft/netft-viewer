@@ -1,0 +1,34 @@
+[workspace]
+authors = ["Net F/T Viewer contributors"]
+channels = ["conda-forge"]
+name = "netft-viewer"
+platforms = ["linux-64", "linux-aarch64", "win-64", "osx-64", "osx-arm64"]
+version = "0.1.0"
+
+[dependencies]
+nodejs = "24.*"
+pnpm = "==11.17.0"
+python = "3.12.*"
+pytest = ">=8,<10"
+cmake = ">=3.21"
+ninja = "*"
+clang = "==22.1.8"
+clangxx = "==22.1.8"
+clang-tools = "==22.1.8"
+clang-format = "==22.1.8"
+pkg-config = "*"
+
+[target.linux-64.dependencies]
+patchelf = "*"
+gcovr = "==8.3"
+gxx_linux-64 = "==13.4.0"
+
+[target.linux-aarch64.dependencies]
+patchelf = "*"
+
+[tasks]
+native-configure = "cmake -S . -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug"
+native-build = "cmake --build build/native"
+native-test = "ctest --test-dir build/native --output-on-failure"
+companion-test = "python -m pytest test/companion/companion_process_test.py -q"
+format-check = "pnpm exec prettier --check app protocol test tools && clang-format --dry-run --Werror $(find core/viewer core/companion test/core test/companion test/hardware -type f \\( -name '*.cpp' -o -name '*.hpp' \\))"

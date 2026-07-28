@@ -1,0 +1,10 @@
+{
+  "name": "@netft-viewer/eslint-toolchain",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "eslint": "10.8.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0"
+  }
+}

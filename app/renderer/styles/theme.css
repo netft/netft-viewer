@@ -1,0 +1,72 @@
+:root {
+  color: #20211f;
+  background: #fcfcfb;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --canvas: #fcfcfb;
+  --sidebar: #f7f7f4;
+  --surface: #ffffff;
+  --ink: #20211f;
+  --muted: #70726d;
+  --border: #e2e3de;
+  --border-strong: #c4c6c0;
+  --accent: #242522;
+  --accent-hover: #111210;
+  --accent-soft: #edeee9;
+  --on-accent: #ffffff;
+  --success: #477b58;
+  --warning: #986a2b;
+  --danger: #c34646;
+  --danger-soft: #f5e7e5;
+  --on-danger: #ffffff;
+  --focus: #595b56;
+  --radius-small: 7px;
+  --radius-medium: 10px;
+  --shadow-control: 0 1px 2px rgb(19 20 18 / 7%);
+  --font-mono:
+    "SFMono-Regular", "Roboto Mono", "Cascadia Code", "Liberation Mono",
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 1100px;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+button,
+input {
+  color: inherit;
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

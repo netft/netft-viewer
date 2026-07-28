@@ -1,0 +1,11 @@
+{"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-missing","monotonicNs":"1"}
+{"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-host-type","monotonicNs":"2","payload":{"sensorHost":17}}
+{"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-host-path","monotonicNs":"3","payload":{"sensorHost":"http://192.168.1.1/config"}}
+{"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-host-option","monotonicNs":"4","payload":{"sensorHost":"--proxy"}}
+{"protocol":{"major":1,"minor":0},"type":"future_command","requestId":"req-unknown","monotonicNs":"5","payload":{}}
+{"protocol":{"major":2,"minor":0},"type":"hello","requestId":"req-major","monotonicNs":"6","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"bias","requestId":"req-decimal","monotonicNs":"01","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"bias","requestId":"req-overflow","monotonicNs":"9223372036854775808","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"set_paused","requestId":"req-scalar","monotonicNs":"7","payload":{"paused":"true"}}
+{"protocol":{"major":1,"minor":4294967296},"type":"hello","requestId":"req-minor-overflow","monotonicNs":"8","payload":{}}
+{"protocol":{"major":1,"minor":0},"type":"hello","requestId":"bad/request","monotonicNs":"9","payload":{}}

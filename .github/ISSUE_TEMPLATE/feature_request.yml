@@ -1,0 +1,72 @@
+name: Feature request
+description: Propose a focused improvement to Net F/T Viewer.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user need and why current behavior does not meet it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable behavior, not only an implementation.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Viewer version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - All platforms
+        - Linux
+        - Windows
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      options:
+        - All supported architectures
+        - x64
+        - ARM64
+        - Universal macOS package
+    validations:
+      required: true
+  - type: input
+    id: sensor
+    attributes:
+      label: Sensor model and firmware
+      description: Optional unless the request depends on specific hardware.
+  - type: textarea
+    id: network
+    attributes:
+      label: Sanitized network constraints
+      description: Include relevant topology or policy without exact private addresses or credentials.
+  - type: textarea
+    id: verification
+    attributes:
+      label: Proposed verification
+      description: List exact commands or observable checks that would demonstrate completion.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Hardware safety
+      options:
+        - label: I confirm that any proposed hardware actions can be performed with the sensor and fixtures in a safe state.
+          required: true

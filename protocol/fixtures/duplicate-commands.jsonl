@@ -1,0 +1,1 @@
+{"protocol":{"major":1,"minor":0},"type":"connect","requestId":"req-duplicate","monotonicNs":"8","payload":{"sensorHost":"192.168.1.1","sensorHost":"sensor.local"}}

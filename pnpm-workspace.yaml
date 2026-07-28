@@ -1,0 +1,24 @@
+packages:
+  - tools/eslint
+
+hoistPattern:
+  - "*"
+
+overrides:
+  "@electron/node-gyp": 10.2.0-electron.2
+
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - fs-xattr
+  - macos-alias
+
+allowBuilds:
+  electron: true
+  electron-winstaller: true
+  fs-xattr: true
+  macos-alias: true
+
+peerDependencyRules:
+  allowedVersions:
+    "@electron/fuses": 2.1.3

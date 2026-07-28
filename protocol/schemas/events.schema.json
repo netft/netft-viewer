@@ -1,0 +1,506 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netft.dev/schemas/viewer/events.schema.json",
+  "title": "Net F/T Viewer companion responses and events",
+  "$defs": {
+    "protocol": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      }
+    },
+    "nanoseconds": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "format": "int64-decimal"
+    },
+    "counter": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "format": "uint64-decimal"
+    },
+    "u32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "forceUnit": {
+      "enum": ["unknown", "lbf", "N", "klbf", "kN", "kgf"]
+    },
+    "torqueUnit": {
+      "enum": ["unknown", "lbf-in", "lbf-ft", "N-m", "N-mm", "kgf-cm", "kN-m"]
+    },
+    "configuration": {
+      "type": "object",
+      "required": [
+        "productName",
+        "countsPerForceUnit",
+        "countsPerTorqueUnit",
+        "forceUnit",
+        "torqueUnit",
+        "source",
+        "revision"
+      ],
+      "properties": {
+        "productName": { "type": "string" },
+        "countsPerForceUnit": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "countsPerTorqueUnit": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "forceUnit": { "$ref": "#/$defs/forceUnit" },
+        "torqueUnit": { "$ref": "#/$defs/torqueUnit" },
+        "source": { "enum": ["sensor", "override"] },
+        "revision": { "$ref": "#/$defs/counter" }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["hostTimeNs", "value"],
+      "properties": {
+        "hostTimeNs": { "$ref": "#/$defs/nanoseconds" },
+        "value": { "type": "number" }
+      }
+    },
+    "base": {
+      "type": "object",
+      "required": ["protocol", "type", "monotonicNs", "payload"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "type": { "type": "string" },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        },
+        "monotonicNs": { "$ref": "#/$defs/nanoseconds" },
+        "payload": { "type": "object" }
+      }
+    }
+  },
+  "allOf": [
+    { "$ref": "#/$defs/base" },
+    {
+      "oneOf": [
+        {
+          "required": ["requestId"],
+          "properties": {
+            "type": { "const": "hello" },
+            "payload": {
+              "type": "object",
+              "required": [
+                "protocolMajor",
+                "protocolMinor",
+                "appVersion",
+                "coreSnapshot"
+              ],
+              "properties": {
+                "protocolMajor": { "const": 1 },
+                "protocolMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "appVersion": { "type": "string", "minLength": 1 },
+                "coreSnapshot": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "required": ["requestId"],
+          "properties": {
+            "type": { "const": "command_result" },
+            "payload": {
+              "type": "object",
+              "required": ["commandType", "success"],
+              "properties": {
+                "commandType": {
+                  "enum": [
+                    "connect",
+                    "disconnect",
+                    "set_paused",
+                    "bias",
+                    "start_recording",
+                    "stop_recording",
+                    "shutdown"
+                  ]
+                },
+                "success": { "type": "boolean" },
+                "errorCode": { "type": "string", "minLength": 1 },
+                "errorMessage": { "type": "string", "minLength": 1 }
+              },
+              "if": {
+                "properties": { "success": { "const": false } },
+                "required": ["success"]
+              },
+              "then": { "required": ["errorCode", "errorMessage"] }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "connection_state" },
+            "payload": {
+              "type": "object",
+              "required": ["state", "paused", "generation", "lastError"],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "disconnected",
+                    "connecting",
+                    "streaming",
+                    "reconnecting",
+                    "disconnecting",
+                    "error"
+                  ]
+                },
+                "paused": { "type": "boolean" },
+                "generation": { "$ref": "#/$defs/counter" },
+                "lastError": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "health" },
+            "payload": {
+              "type": "object",
+              "required": [
+                "state",
+                "faultCode",
+                "sensorHost",
+                "rdtPort",
+                "lastRdtSequence",
+                "lastFtSequence",
+                "lastStatus",
+                "receiveRateHz",
+                "deliveryRateHz",
+                "receivedCount",
+                "deliveredCount",
+                "rateLimitedCount",
+                "deviceErrorCount",
+                "warningCount",
+                "lostCount",
+                "duplicateCount",
+                "outOfOrderCount",
+                "malformedCount",
+                "reconnectCount",
+                "timeoutCount",
+                "callbackErrorCount",
+                "ftStallCount",
+                "ftBackwardCount",
+                "ftRestartCount",
+                "calibrationChangeCount",
+                "lastRecordAgeNs",
+                "lastError",
+                "lastFtProgress"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "stopped",
+                    "connecting",
+                    "streaming",
+                    "backoff",
+                    "faulted"
+                  ]
+                },
+                "faultCode": {
+                  "enum": [
+                    "none",
+                    "sensor_configuration",
+                    "timeout",
+                    "socket",
+                    "serious_status",
+                    "ft_stall",
+                    "ft_backward",
+                    "malformed_storm",
+                    "callback"
+                  ]
+                },
+                "sensorHost": { "type": "string" },
+                "rdtPort": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                },
+                "sensorConfiguration": {
+                  "$ref": "#/$defs/configuration"
+                },
+                "lastRdtSequence": {
+                  "anyOf": [{ "$ref": "#/$defs/u32" }, { "type": "null" }]
+                },
+                "lastFtSequence": {
+                  "anyOf": [{ "$ref": "#/$defs/u32" }, { "type": "null" }]
+                },
+                "lastStatus": { "$ref": "#/$defs/u32" },
+                "receiveRateHz": { "type": "number", "minimum": 0 },
+                "deliveryRateHz": { "type": "number", "minimum": 0 },
+                "receivedCount": { "$ref": "#/$defs/counter" },
+                "deliveredCount": { "$ref": "#/$defs/counter" },
+                "rateLimitedCount": { "$ref": "#/$defs/counter" },
+                "deviceErrorCount": { "$ref": "#/$defs/counter" },
+                "warningCount": { "$ref": "#/$defs/counter" },
+                "lostCount": { "$ref": "#/$defs/counter" },
+                "duplicateCount": { "$ref": "#/$defs/counter" },
+                "outOfOrderCount": { "$ref": "#/$defs/counter" },
+                "malformedCount": { "$ref": "#/$defs/counter" },
+                "reconnectCount": { "$ref": "#/$defs/counter" },
+                "timeoutCount": { "$ref": "#/$defs/counter" },
+                "callbackErrorCount": { "$ref": "#/$defs/counter" },
+                "ftStallCount": { "$ref": "#/$defs/counter" },
+                "ftBackwardCount": { "$ref": "#/$defs/counter" },
+                "ftRestartCount": { "$ref": "#/$defs/counter" },
+                "calibrationChangeCount": { "$ref": "#/$defs/counter" },
+                "lastRecordAgeNs": {
+                  "anyOf": [
+                    { "$ref": "#/$defs/nanoseconds" },
+                    { "type": "null" }
+                  ]
+                },
+                "lastError": { "type": "string" },
+                "lastFtProgress": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "live_wrench" },
+            "payload": {
+              "type": "object",
+              "required": [
+                "hostTimeNs",
+                "sampleMonotonicNs",
+                "rdtSequence",
+                "ftSequence",
+                "status",
+                "raw",
+                "force",
+                "torque",
+                "forceUnit",
+                "torqueUnit",
+                "configurationRevision"
+              ],
+              "properties": {
+                "hostTimeNs": { "$ref": "#/$defs/nanoseconds" },
+                "sampleMonotonicNs": { "$ref": "#/$defs/nanoseconds" },
+                "rdtSequence": { "$ref": "#/$defs/u32" },
+                "ftSequence": { "$ref": "#/$defs/u32" },
+                "status": { "$ref": "#/$defs/u32" },
+                "raw": {
+                  "type": "array",
+                  "minItems": 6,
+                  "maxItems": 6,
+                  "items": {
+                    "type": "integer",
+                    "minimum": -2147483648,
+                    "maximum": 2147483647
+                  }
+                },
+                "force": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": { "type": "number" }
+                },
+                "torque": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": { "type": "number" }
+                },
+                "forceUnit": { "$ref": "#/$defs/forceUnit" },
+                "torqueUnit": { "$ref": "#/$defs/torqueUnit" },
+                "configurationRevision": { "$ref": "#/$defs/counter" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "plot_batch" },
+            "payload": {
+              "type": "object",
+              "required": ["axes"],
+              "properties": {
+                "axes": {
+                  "type": "array",
+                  "minItems": 6,
+                  "maxItems": 6,
+                  "prefixItems": [
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Fx" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Fy" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Fz" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Tx" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Ty" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["axis", "points"],
+                      "properties": {
+                        "axis": { "const": "Tz" },
+                        "points": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": { "$ref": "#/$defs/point" }
+                        }
+                      }
+                    }
+                  ],
+                  "items": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "recording_state" },
+            "payload": {
+              "type": "object",
+              "required": ["state", "partialPath", "lastError"],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "idle",
+                    "starting",
+                    "recording",
+                    "pausing",
+                    "paused",
+                    "stopping",
+                    "error"
+                  ]
+                },
+                "partialPath": { "type": "string" },
+                "lastError": { "type": "string" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "recording_progress" },
+            "payload": {
+              "type": "object",
+              "required": [
+                "acceptedSamples",
+                "writtenSamples",
+                "bytesWritten",
+                "queueSize",
+                "queueCapacity"
+              ],
+              "properties": {
+                "acceptedSamples": { "$ref": "#/$defs/counter" },
+                "writtenSamples": { "$ref": "#/$defs/counter" },
+                "bytesWritten": { "$ref": "#/$defs/counter" },
+                "queueSize": { "$ref": "#/$defs/counter" },
+                "queueCapacity": { "$ref": "#/$defs/counter" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "configuration_changed" },
+            "payload": { "$ref": "#/$defs/configuration" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "error" },
+            "payload": {
+              "type": "object",
+              "required": ["operation", "message", "sequence", "droppedBefore"],
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "protocol",
+                    "connect",
+                    "disconnect",
+                    "pause",
+                    "resume",
+                    "bias",
+                    "start_recording",
+                    "stop_recording",
+                    "sensor",
+                    "recording"
+                  ]
+                },
+                "message": { "type": "string" },
+                "errorCode": { "type": "string", "minLength": 1 },
+                "sequence": { "$ref": "#/$defs/counter" },
+                "droppedBefore": { "$ref": "#/$defs/counter" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

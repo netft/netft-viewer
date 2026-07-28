@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netft.dev/schemas/viewer/envelope.schema.json",
+  "title": "Net F/T Viewer companion envelope",
+  "type": "object",
+  "required": ["protocol", "type", "monotonicNs", "payload"],
+  "properties": {
+    "protocol": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      }
+    },
+    "type": { "type": "string", "minLength": 1 },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "monotonicNs": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "format": "int64-decimal"
+    },
+    "payload": {}
+  }
+}

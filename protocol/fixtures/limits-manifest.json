@@ -1,0 +1,10 @@
+{
+  "limitBytes": 1048576,
+  "commandPaddingBytes": 1048576,
+  "eventPaddingBytes": 1048576,
+  "maximumNestingDepth": 64,
+  "maximumRequestIdBytes": 128,
+  "maximumProtocolMinor": 4294967295,
+  "minimumRawWrench": -2147483648,
+  "maximumRawWrench": 2147483647
+}
