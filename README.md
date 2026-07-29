@@ -1,10 +1,10 @@
 # Net F/T Viewer
 
-[![CI](https://github.com/netft/netft-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/netft/netft-viewer/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/netft/netft-viewer/actions/workflows/codeql.yml/badge.svg)](https://github.com/netft/netft-viewer/actions/workflows/codeql.yml)
-[![codecov](https://codecov.io/gh/netft/netft-viewer/graph/badge.svg)](https://codecov.io/gh/netft/netft-viewer)
-[![Release](https://img.shields.io/github/v/release/netft/netft-viewer?display_name=tag&sort=semver)](https://github.com/netft/netft-viewer/releases)
-[![License](https://img.shields.io/github/license/netft/netft-viewer)](LICENSE)
+[![CI](https://github.com/netft/netft-viewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/netft/netft-viewer/actions/workflows/ci.yml)
+[![Package](https://github.com/netft/netft-viewer/actions/workflows/package.yml/badge.svg?branch=main)](https://github.com/netft/netft-viewer/actions/workflows/package.yml)
+[![CodeQL](https://github.com/netft/netft-viewer/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/netft/netft-viewer/actions/workflows/codeql.yml)
+[![Coverage](https://codecov.io/gh/netft/netft-viewer/graph/badge.svg?branch=main)](https://codecov.io/gh/netft/netft-viewer)
+[![License](https://img.shields.io/github/license/netft/netft-viewer?label=license)](LICENSE)
 
 Net F/T Viewer is a cross-platform desktop application for connecting directly to one ATI Net F/T sensor, inspecting its six-axis wrench in real time, and recording calibrated data without a ROS installation.
 
