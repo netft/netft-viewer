@@ -228,7 +228,8 @@ TEST(ProtocolTest, RejectsUncorrelatableResponseValues) {
                                                       "not-a-snapshot"};
   EXPECT_FALSE(netft_viewer::companion::serialize_event(bad_hello));
   const netft_viewer::companion::HelloEvent bad_request_id{
-      "bad/request", 1, "0.1.0", "e424c401587052f03de9b94f76f1e86b78902105"};
+      "bad/request", 1, "0.1.0",
+      "0123456789abcdef0123456789abcdef01234567"};
   EXPECT_FALSE(netft_viewer::companion::serialize_event(bad_request_id));
 
   const netft_viewer::companion::CommandResultEvent hello_result{

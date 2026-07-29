@@ -4,5 +4,5 @@ import test from "node:test";
 
 test("snapshot records the exact upstream commit", () => {
   const text = readFileSync("CORE_SNAPSHOT.md", "utf8");
-  assert.match(text, /e424c401587052f03de9b94f76f1e86b78902105/);
+  assert.match(text, /f2c24fe22372dc8b2383bc08320ab1c5fe06ac21/);
 });

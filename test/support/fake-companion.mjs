@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 
 const APP_VERSION = "0.1.0";
-const CORE_SNAPSHOT = "e424c401587052f03de9b94f76f1e86b78902105";
+const CORE_SNAPSHOT = "f2c24fe22372dc8b2383bc08320ab1c5fe06ac21";
 const MAXIMUM_CONTROL_BYTES = 64 * 1024;
 const controlFile = process.env.NETFT_VIEWER_E2E_CONTROL_FILE;
 const controlToken = process.env.NETFT_VIEWER_E2E_CONTROL_TOKEN;

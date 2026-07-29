@@ -26,7 +26,7 @@ const executablePath = resolve(
   "build/native/core/companion/netft-viewer-companion",
 );
 const appVersion = "test-version";
-const coreSnapshot = "e424c401587052f03de9b94f76f1e86b78902105";
+const coreSnapshot = "0123456789abcdef0123456789abcdef01234567";
 
 class FakeProcess extends EventEmitter implements CompanionProcess {
   readonly stdin = new PassThrough();

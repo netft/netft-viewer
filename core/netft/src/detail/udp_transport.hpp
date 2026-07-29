@@ -35,7 +35,6 @@ public:
   void shutdown() noexcept;
   void close() noexcept;
 
-  // Private-header synchronization seam for the transport contract test.
   void set_wait_started_test_hook(WaitStartedTestHook hook, void *context) {
     std::scoped_lock lock(mutex_);
     wait_started_test_hook_ = hook;
