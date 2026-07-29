@@ -4,7 +4,8 @@ This repository carries an auditable source snapshot of the native `netft-cpp`
 library.
 
 - Upstream repository: `https://github.com/netft/netft-cpp.git`
-- Upstream commit: `f2c24fe22372dc8b2383bc08320ab1c5fe06ac21`
+- Upstream release: `v0.3.0`
+- Upstream commit: `46ee05639f818a17c1cfe604d0d77b1feb8f9b2b`
 - Snapshot date: `2026-07-29`
 - Copied library paths: `include/netft/**` and `src/**`
 - Copied native-test paths: the twelve non-CLI `test/test_*.cpp` unit tests and

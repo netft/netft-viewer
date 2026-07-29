@@ -701,7 +701,7 @@ const boot = async (): Promise<void> => {
       appPath: app.getAppPath(),
     }),
     expectedAppVersion: app.getVersion(),
-    expectedCoreSnapshot: "f2c24fe22372dc8b2383bc08320ab1c5fe06ac21",
+    expectedCoreSnapshot: "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b",
     logStore: logs,
   });
   const cleanupCommands = registerIpcHandlers({
