@@ -82,6 +82,15 @@ const nativeExecutable = (buildDirectory, platform) =>
       : "netft-viewer-companion",
   );
 
+const readCoreSnapshot = async () => {
+  const snapshotDocument = await readFile("CORE_SNAPSHOT.md", "utf8");
+  const snapshot = snapshotDocument.match(/\b[0-9a-f]{40}\b/)?.[0];
+  if (snapshot === undefined) {
+    throw new Error("core snapshot identity is unavailable");
+  }
+  return snapshot;
+};
+
 const prepareNativeCompanion = async (platform, architecture) => {
   const buildDirectory = resolve(
     process.env.NETFT_VIEWER_CMAKE_BUILD_DIR ??
@@ -97,6 +106,7 @@ const prepareNativeCompanion = async (platform, architecture) => {
     "-DBUILD_TESTING=OFF",
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_SKIP_RPATH=ON",
+    `-DNETFT_VIEWER_CORE_SNAPSHOT=${await readCoreSnapshot()}`,
   ];
   if (platform === "darwin" && architecture === "universal") {
     configure.push("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64");
