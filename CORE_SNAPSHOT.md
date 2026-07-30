@@ -8,8 +8,9 @@ library.
 - Upstream commit: `46ee05639f818a17c1cfe604d0d77b1feb8f9b2b`
 - Snapshot date: `2026-07-29`
 - Copied library paths: `include/netft/**` and `src/**`
-- Copied native-test paths: the twelve non-CLI `test/test_*.cpp` unit tests and
-  `test/support/**`
+- Copied native-test support: `test/support/fake_http_server.*` and
+  `test/support/fake_sensor.*`, plus their portable socket helper
+  `test/support/socket_runtime.hpp`
 - Local destinations: `core/netft/include/netft/**`, `core/netft/src/**`, and
   `core/netft/test/**`
 
@@ -31,13 +32,11 @@ The viewer intentionally retains only these local adaptations:
 - The top-level viewer dependency configuration supplies a pinned, minimal,
   static libcurl for application packaging. Upstream `netft-cpp` continues to
   use `find_package(CURL)` and does not inherit this application policy.
-- `core/netft/test/CMakeLists.txt` adapts target names and omits the excluded
-  CLI, installation, hardware, release, and repository-automation tests.
 - `include/netft/client.hpp`, `src/client.cpp`,
-  `src/detail/client_impl.{hpp,cpp}`, and `test/test_client_lifecycle.cpp`
-  retain the viewer's deferred destruction behavior when a `Client` is
-  destroyed from its own sample callback. This lifecycle contract is not part
-  of upstream `netft-cpp`.
+  and `src/detail/client_impl.{hpp,cpp}` retain the viewer's deferred
+  destruction behavior when a `Client` is destroyed from its own sample
+  callback. Viewer integration tests cover this local lifecycle contract,
+  which is not part of upstream `netft-cpp`.
 - Snapshot sources retain the viewer repository's established formatting.
   Whitespace-only differences are not behavioral overlays.
 
@@ -48,14 +47,12 @@ No public transport API differs from the recorded upstream commit.
 1. Fetch `https://github.com/netft/netft-cpp.git` and check out the exact commit
    recorded above in a clean temporary worktree.
 2. Generate manifests with `git ls-tree -r --name-only <commit> -- include/netft
-   src test`. Retain all files under `include/netft` and `src`.
+   src test/support`. Retain all files under `include/netft` and `src`.
 3. Copy each retained header and source file individually to a temporary
    staging tree, preserving relative paths and contents.
-4. From `test`, copy `test_types.cpp`, `test_protocol.cpp`, `test_status.cpp`,
-   `test_sequence.cpp`, `test_fault_latch.cpp`, `test_posix_transport.cpp`,
-   `test_udp_transport.cpp`, `test_socket_runtime.cpp`, `test_discovery.cpp`,
-   `test_client_stream.cpp`, `test_client_recovery.cpp`,
-   `test_client_lifecycle.cpp`, and every file under `test/support`.
+4. From `test/support`, copy only `fake_http_server.*`, `fake_sensor.*`, and
+   `socket_runtime.hpp`, which support the viewer's session integration tests.
+   Upstream core unit tests remain owned and executed by `netft-cpp`.
 5. Reapply only the viewer-local lifecycle adaptation listed above. Keep the
    viewer's dependency and CMake integration files rather than copying
    upstream packaging configuration.
@@ -63,10 +60,5 @@ No public transport API differs from the recorded upstream commit.
    `git diff --no-index --ignore-all-space`. Any non-whitespace difference
    outside the listed lifecycle files must be resolved before updating this
    document.
-7. Reconcile upstream `test/CMakeLists.txt` manually: replace the upstream
-   library target with `netft_viewer_netft`, retain the twelve native test
-   definitions, and do not import CLI, hardware, install, release, or
-   repository-automation tests.
-8. Confirm the excluded paths are absent, then run `pixi run native-configure`,
-   `pixi run native-build`, `pixi run native-test`, and the project provenance
-   test before committing.
+7. Confirm the excluded paths are absent, then run `pixi run native-configure`,
+   `pixi run native-build`, and `pixi run native-test` before committing.

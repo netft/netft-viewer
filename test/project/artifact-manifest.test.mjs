@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { writeArtifactManifest } from "../../tools/write-artifact-manifest.mjs";
 
-test("artifact manifest derives paths from package version and Task 14 layouts", async (context) => {
+test("artifact manifest derives native package paths from version and target", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "netft-artifact-manifest-"));
   context.after(async () => {
     await rm(temporary, { recursive: true, force: true });

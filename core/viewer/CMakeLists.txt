@@ -28,6 +28,7 @@ if(NETFT_VIEWER_SANITIZERS)
 endif()
 
 if(BUILD_TESTING)
+  FetchContent_MakeAvailable(googletest)
   if(TARGET GTest::gtest_main)
     set(_netft_viewer_gtest_main GTest::gtest_main)
   elseif(TARGET GTest::Main)
@@ -67,6 +68,14 @@ if(BUILD_TESTING)
   )
   add_test(NAME PlotAggregator COMMAND netft_viewer_plot_aggregator)
 
+  add_library(netft_viewer_test_socket INTERFACE)
+  target_include_directories(netft_viewer_test_socket INTERFACE
+    ${PROJECT_SOURCE_DIR}/core/netft/test
+  )
+  if(WIN32)
+    target_link_libraries(netft_viewer_test_socket INTERFACE ws2_32)
+  endif()
+
   add_executable(netft_viewer_session
     ${PROJECT_SOURCE_DIR}/test/core/test_session.cpp
     ${PROJECT_SOURCE_DIR}/core/netft/test/support/fake_http_server.cpp
@@ -79,7 +88,7 @@ if(BUILD_TESTING)
   )
   target_link_libraries(netft_viewer_session PRIVATE
     netft_viewer_core
-    netft_test_socket
+    netft_viewer_test_socket
     ${_netft_viewer_gtest_main}
   )
   add_test(NAME ViewerSession COMMAND netft_viewer_session)
