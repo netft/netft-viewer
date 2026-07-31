@@ -122,7 +122,7 @@ afterEach(() => {
 describe("fixed sensor sidebar", () => {
   it("shows the default host and connection action without auto-connecting", () => {
     const { api, emit } = installApi();
-    render(<App />);
+    render(<App initialPreferences={DEFAULT_PREFERENCES} />);
 
     expect(
       (screen.getByTestId("sensor-host-input") as HTMLInputElement).value,
@@ -253,7 +253,7 @@ describe("fixed sensor sidebar", () => {
 
   it("routes connection input and actions through the narrow API", async () => {
     const { api, emit } = installApi();
-    render(<App />);
+    render(<App initialPreferences={DEFAULT_PREFERENCES} />);
 
     act(() => {
       emit({
@@ -351,7 +351,7 @@ describe("fixed sensor sidebar", () => {
 
   it("cleans up its event subscription on unmount", () => {
     const { unsubscribe } = installApi();
-    const view = render(<App />);
+    const view = render(<App initialPreferences={DEFAULT_PREFERENCES} />);
 
     expect(unsubscribe).not.toHaveBeenCalled();
     view.unmount();
@@ -389,7 +389,7 @@ describe("fixed sensor sidebar", () => {
       configurable: true,
       value: vi.fn(),
     });
-    render(<App />);
+    render(<App initialPreferences={DEFAULT_PREFERENCES} />);
 
     act(() => {
       emit({
