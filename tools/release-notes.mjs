@@ -13,11 +13,13 @@ export const releaseNotes = (changelog, version) => {
   }
   const bodyStart = match.index + match[0].length;
   const remainder = changelog.slice(bodyStart);
-  const nextHeading = remainder.search(/^## /m);
-  const body =
-    nextHeading === -1
-      ? remainder.trim()
-      : remainder.slice(0, nextHeading).trim();
+  const boundaries = [
+    remainder.search(/^## /m),
+    remainder.search(/^\[[^\]]+\]:\s/m),
+  ].filter((index) => index !== -1);
+  const bodyEnd =
+    boundaries.length === 0 ? remainder.length : Math.min(...boundaries);
+  const body = remainder.slice(0, bodyEnd).trim();
   if (body.length === 0) {
     throw new Error(`CHANGELOG.md has no notes for ${version}`);
   }

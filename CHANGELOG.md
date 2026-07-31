@@ -7,12 +7,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Fixed
-
-- Update the private netft-cpp core to v0.3.1 so fail-stop sessions do not surface
-  stalled or backward FT-sequence samples.
-
-## [0.1.0] - 2026-07-27
+## [0.1.0] - 2026-07-31
 
 ### Added
 
@@ -21,6 +16,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Raw counts, calibrated measurements, sensor health, and recording status in one sidebar.
 - Safe Pause, Resume, Bias, and buffered CSV recording workflows.
 - Native installers and portable archives for Linux, Windows, and macOS.
+
+### Changed
+
+- Use the netft-cpp v0.3.1 core so fail-stop sessions do not surface stalled or
+  backward FT-sequence samples.
 
 [Unreleased]: https://github.com/netft/netft-viewer/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/netft/netft-viewer/releases/tag/v0.1.0

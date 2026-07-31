@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
+import { releaseNotes } from "../../tools/release-notes.mjs";
+
 const fakeGh = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -153,6 +155,25 @@ const runPublisher = (fixture, mode, extraEnv = {}) =>
       },
     },
   );
+
+test("release notes exclude changelog link definitions", () => {
+  const changelog = `# Changelog
+
+## [0.1.0] - 2026-07-31
+
+### Added
+
+- First release.
+
+[Unreleased]: https://example.invalid/compare/v0.1.0...HEAD
+[0.1.0]: https://example.invalid/releases/tag/v0.1.0
+`;
+
+  assert.equal(
+    releaseNotes(changelog, "0.1.0"),
+    "### Added\n\n- First release.\n",
+  );
+});
 
 test("draft staging uploads, downloads, and byte-verifies assets idempotently", async () => {
   const files = await fixture();
