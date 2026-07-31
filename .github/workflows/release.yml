@@ -67,16 +67,7 @@ jobs:
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
       - id: collect
         name: Collect package assets
-        run: |
-          mkdir release-assets
-          while IFS= read -r -d '' source; do
-            name="$(basename "$source")"
-            if [[ -e "release-assets/$name" ]]; then
-              echo "::error::duplicate release asset name: $name" >&2
-              exit 1
-            fi
-            cp -- "$source" "release-assets/$name"
-          done < <(find release-input -type f -print0 | sort -z)
+        run: .github/scripts/collect_release_assets.sh release-input release-assets
       - id: sbom
         name: Generate release SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610

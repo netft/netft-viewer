@@ -205,6 +205,29 @@ test("checksum generation supports release asset names with spaces", async () =>
   assert.equal(verify.status, 0, verify.stderr);
 });
 
+test("release collection canonicalizes asset names before upload", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "netft-viewer-collection-"));
+  const source = join(directory, "source");
+  const nested = join(source, "macos");
+  const destination = join(directory, "release-assets");
+  await mkdir(nested, { recursive: true });
+  await writeFile(join(nested, "Net F-T Viewer.dmg"), "artifact");
+
+  const collect = spawnSync(
+    "bash",
+    [".github/scripts/collect_release_assets.sh", source, destination],
+    {
+      cwd: new URL("../..", import.meta.url),
+      encoding: "utf8",
+    },
+  );
+  assert.equal(collect.status, 0, collect.stderr);
+  assert.equal(
+    await readFile(join(destination, "Net-F-T-Viewer.dmg"), "utf8"),
+    "artifact",
+  );
+});
+
 test("draft staging uploads, downloads, and byte-verifies assets idempotently", async () => {
   const files = await fixture();
   const first = runPublisher(files, "stage");
