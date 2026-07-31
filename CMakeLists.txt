@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(netft_viewer VERSION 0.1.0 LANGUAGES CXX)
 set(
   NETFT_VIEWER_CORE_SNAPSHOT
-  "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b"
+  "859eeda8b077093f9bc49d9c1e5506c334647e7b"
   CACHE STRING
   "netft-cpp snapshot identity embedded in the companion"
 )

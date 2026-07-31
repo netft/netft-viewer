@@ -7,6 +7,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Update the private netft-cpp core to v0.3.1 so fail-stop sessions do not surface
+  stalled or backward FT-sequence samples.
+
 ## [0.1.0] - 2026-07-27
 
 ### Added
