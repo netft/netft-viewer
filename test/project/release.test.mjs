@@ -175,6 +175,27 @@ test("release notes exclude changelog link definitions", () => {
   );
 });
 
+test("checksum generation supports release asset names with spaces", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "netft-viewer-checksums-"));
+  await writeFile(join(directory, "Net F-T Viewer.dmg"), "artifact");
+
+  const generate = spawnSync(
+    "bash",
+    [".github/scripts/generate_checksums.sh", directory],
+    {
+      cwd: new URL("../..", import.meta.url),
+      encoding: "utf8",
+    },
+  );
+  assert.equal(generate.status, 0, generate.stderr);
+
+  const verify = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
+    cwd: directory,
+    encoding: "utf8",
+  });
+  assert.equal(verify.status, 0, verify.stderr);
+});
+
 test("draft staging uploads, downloads, and byte-verifies assets idempotently", async () => {
   const files = await fixture();
   const first = runPublisher(files, "stage");

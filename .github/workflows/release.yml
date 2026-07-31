@@ -93,11 +93,7 @@ jobs:
         run: mv -- "netft-viewer-${{ steps.versions.outputs.version }}.spdx.json" release-assets/
       - id: checksums
         name: Generate SHA-256 manifest
-        working-directory: release-assets
-        run: |
-          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' |
-            LC_ALL=C sort |
-            xargs -r sha256sum -- > SHA256SUMS
+        run: .github/scripts/generate_checksums.sh release-assets
       - id: verify
         name: Verify collected bytes and checksums
         run: |
