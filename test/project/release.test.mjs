@@ -60,13 +60,16 @@ if (args[0] === "api") {
   }
   if (endpoint === "repos/netft/netft-viewer/releases/tags/v0.1.0") {
     failApi("release");
-    if (!state.exists) respond(404, { message: "Not Found" });
+    if (!state.exists || state.draft) respond(404, { message: "Not Found" });
+    respond(200, releaseBody());
+  }
+  if (endpoint === "repos/netft/netft-viewer/releases?per_page=100") {
     if (state.postCreateNotFound > 0 && state.mutations.create > 0) {
       state.postCreateNotFound -= 1;
       save(state);
-      respond(404, { message: "Not Found" });
+      respond(200, []);
     }
-    respond(200, releaseBody());
+    respond(200, state.exists ? [releaseBody()] : []);
   }
   process.exit(92);
 }

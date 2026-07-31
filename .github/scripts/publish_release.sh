@@ -137,13 +137,57 @@ else
 fi
 
 release_endpoint="repos/$GITHUB_REPOSITORY/releases/tags/$tag"
+release_list_endpoint="repos/$GITHUB_REPOSITORY/releases?per_page=100"
 release_file="$work_dir/release.json"
+release_list_file="$work_dir/releases.json"
+
+lookup_release() {
+  local request_status
+  local selection_status
+
+  if api_request "$release_endpoint" "$release_file" true; then
+    return 0
+  else
+    request_status=$?
+  fi
+  if [[ "$api_http_status" != 404 ]]; then
+    return "$request_status"
+  fi
+
+  if api_request "$release_list_endpoint" "$release_list_file" false; then
+    :
+  else
+    request_status=$?
+    return "$request_status"
+  fi
+
+  set +e
+  node -e '
+    const fs = require("node:fs");
+    const [tag, source, destination] = process.argv.slice(1);
+    const releases = JSON.parse(fs.readFileSync(source, "utf8"));
+    if (!Array.isArray(releases)) process.exit(2);
+    const matches = releases.filter((release) => release.tag_name === tag);
+    if (matches.length === 0) process.exit(1);
+    if (matches.length !== 1) process.exit(2);
+    fs.writeFileSync(destination, JSON.stringify(matches[0]));
+  ' "$tag" "$release_list_file" "$release_file"
+  selection_status=$?
+  set -e
+
+  if [[ "$selection_status" -eq 0 || "$selection_status" -eq 1 ]]; then
+    return "$selection_status"
+  fi
+  echo "release list response is invalid or ambiguous" >&2
+  return 65
+}
+
 release_exists=false
-if api_request "$release_endpoint" "$release_file" true; then
+if lookup_release; then
   release_exists=true
 else
   request_status=$?
-  if [[ "$api_http_status" != 404 ]]; then
+  if [[ "$request_status" -ne 1 ]]; then
     exit "$request_status"
   fi
 fi
@@ -168,12 +212,13 @@ if [[ "$release_exists" != true ]]; then
   fi
   release_available=false
   for attempt in {1..5}; do
-    if api_request "$release_endpoint" "$release_file" true; then
+    if lookup_release; then
       release_available=true
       break
+    else
+      request_status=$?
     fi
-    request_status=$?
-    if [[ "$api_http_status" != 404 ]]; then
+    if [[ "$request_status" -ne 1 ]]; then
       exit "$request_status"
     fi
     if ((attempt < 5)); then
@@ -282,10 +327,13 @@ for name in "${!local_assets[@]}"; do
   fi
 done
 
-if api_request "$release_endpoint" "$release_file" false; then
+if lookup_release; then
   :
 else
   request_status=$?
+  if [[ "$request_status" -eq 1 ]]; then
+    echo "release disappeared during asset verification" >&2
+  fi
   exit "$request_status"
 fi
 release_json="$(<"$release_file")"
@@ -316,10 +364,13 @@ if [[ "$mode" == "publish" && "$is_draft" == true ]]; then
 fi
 
 if [[ "$mode" == "publish" ]]; then
-  if api_request "$release_endpoint" "$release_file" false; then
+  if lookup_release; then
     :
   else
     request_status=$?
+    if [[ "$request_status" -eq 1 ]]; then
+      echo "release disappeared after publication" >&2
+    fi
     exit "$request_status"
   fi
   release_json="$(<"$release_file")"
