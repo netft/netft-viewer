@@ -89,7 +89,9 @@ jobs:
         name: Verify collected bytes and checksums
         run: |
           while IFS= read -r -d '' source; do
-            cmp -- "$source" "release-assets/$(basename "$source")"
+            name="$(basename "$source")"
+            canonical_name="${name// /-}"
+            cmp -- "$source" "release-assets/$canonical_name"
           done < <(find release-input -type f -print0 | sort -z)
           (cd release-assets && sha256sum --check SHA256SUMS)
       - id: upload
