@@ -61,6 +61,11 @@ if (args[0] === "api") {
   if (endpoint === "repos/netft/netft-viewer/releases/tags/v0.1.0") {
     failApi("release");
     if (!state.exists) respond(404, { message: "Not Found" });
+    if (state.postCreateNotFound > 0 && state.mutations.create > 0) {
+      state.postCreateNotFound -= 1;
+      save(state);
+      respond(404, { message: "Not Found" });
+    }
     respond(200, releaseBody());
   }
   process.exit(92);
@@ -120,6 +125,7 @@ const fixture = async () => {
       draft: false,
       exists: false,
       mutations: { create: 0, publish: 0, upload: 0 },
+      postCreateNotFound: 0,
       postPublishStuck: false,
       tag: "",
       title: "",
@@ -220,6 +226,25 @@ test("draft staging uploads, downloads, and byte-verifies assets idempotently", 
     JSON.parse(await readFile(files.state, "utf8")).mutations,
     firstState.mutations,
   );
+});
+
+test("publisher retries a newly created release lookup", async () => {
+  const files = await fixture();
+  const state = JSON.parse(await readFile(files.state, "utf8"));
+  state.postCreateNotFound = 2;
+  await writeFile(files.state, JSON.stringify(state));
+
+  const publish = runPublisher(files, "stage", {
+    RELEASE_LOOKUP_RETRY_DELAY_SECONDS: "0",
+  });
+  assert.equal(publish.status, 0, publish.stderr);
+  const published = JSON.parse(await readFile(files.state, "utf8"));
+  assert.equal(published.postCreateNotFound, 0);
+  assert.deepEqual(published.mutations, {
+    create: 1,
+    publish: 0,
+    upload: 3,
+  });
 });
 
 test("published releases remain byte-identical and immutable", async () => {

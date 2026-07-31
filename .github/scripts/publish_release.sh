@@ -160,11 +160,29 @@ if [[ "$release_exists" != true ]]; then
     --verify-tag \
     --title "Net F/T Viewer $tag" \
     --notes-file "$notes_file"
-  if api_request "$release_endpoint" "$release_file" false; then
-    :
-  else
+
+  retry_delay="${RELEASE_LOOKUP_RETRY_DELAY_SECONDS:-1}"
+  if [[ ! "$retry_delay" =~ ^[0-9]+$ ]] || ((retry_delay > 10)); then
+    echo "invalid release lookup retry delay" >&2
+    exit 64
+  fi
+  release_available=false
+  for attempt in {1..5}; do
+    if api_request "$release_endpoint" "$release_file" true; then
+      release_available=true
+      break
+    fi
     request_status=$?
-    exit "$request_status"
+    if [[ "$api_http_status" != 404 ]]; then
+      exit "$request_status"
+    fi
+    if ((attempt < 5)); then
+      sleep "$retry_delay"
+    fi
+  done
+  if [[ "$release_available" != true ]]; then
+    echo "created release is not yet available through the API" >&2
+    exit 69
   fi
 fi
 
