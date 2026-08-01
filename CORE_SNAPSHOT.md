@@ -4,8 +4,8 @@ This repository carries an auditable source snapshot of the native `netft-cpp`
 library.
 
 - Upstream repository: `https://github.com/netft/netft-cpp.git`
-- Upstream release: `v0.3.2`
-- Upstream commit: `95f0e721b885a2fc88e028f41987607747a42085`
+- Upstream release: `v0.3.3`
+- Upstream commit: `3259b8576b16fb150b51e9ef9090366c5e6efcba`
 - Snapshot date: `2026-08-01`
 - Copied library paths: `include/netft/**` and `src/**`
 - Copied native-test support: `test/support/fake_http_server.*` and
@@ -33,7 +33,7 @@ The viewer intentionally retains only these local integration policies:
   static libcurl for application packaging. Upstream `netft-cpp` continues to
   use `find_package(CURL)` and does not inherit this application policy.
 - The copied headers, sources, and test-support files are not modified. Client
-  destruction from a sample callback is part of upstream `netft-cpp` v0.3.2,
+  destruction from a sample callback is part of upstream `netft-cpp` v0.3.3,
   so the former viewer-owned lifecycle overlay has been removed.
 
 No copied core API or implementation differs from the recorded upstream
