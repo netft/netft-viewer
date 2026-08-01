@@ -20,8 +20,8 @@ namespace {
 constexpr std::uintptr_t kInvalidSocket = ~std::uintptr_t{0};
 
 std::runtime_error winsock_error(const char *operation, const int error) {
-  return std::runtime_error(std::string{operation} + " (WinSock error " +
-                            std::to_string(error) + ")");
+  return std::runtime_error(std::string{operation} + " (WinSock error " + std::to_string(error) +
+                            ")");
 }
 
 std::runtime_error last_winsock_error(const char *operation) {
@@ -36,9 +36,7 @@ int timeout_milliseconds(const std::chrono::duration<double> timeout) {
   return static_cast<int>(milliseconds);
 }
 
-SOCKET native_socket(const std::uintptr_t socket) {
-  return static_cast<SOCKET>(socket);
-}
+SOCKET native_socket(const std::uintptr_t socket) { return static_cast<SOCKET>(socket); }
 
 int socket_wait_error(const SOCKET socket, const short events) {
   if ((events & POLLNVAL) != 0) {
@@ -48,8 +46,8 @@ int socket_wait_error(const SOCKET socket, const short events) {
   int error = 0;
   int error_size = sizeof(error);
   if ((events & POLLERR) != 0 &&
-      ::getsockopt(socket, SOL_SOCKET, SO_ERROR,
-                   reinterpret_cast<char *>(&error), &error_size) == 0 &&
+      ::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&error), &error_size) ==
+          0 &&
       error != 0) {
     return error;
   }
@@ -76,24 +74,20 @@ void UdpTransport::connect(const std::string &host, const int port) {
   hints.ai_socktype = SOCK_DGRAM;
   addrinfo *addresses = nullptr;
   const auto service = std::to_string(port);
-  const int result =
-      ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
+  const int result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
   if (result != 0) {
     throw winsock_error("failed to resolve sensor", result);
   }
 
   SOCKET connected_socket = INVALID_SOCKET;
   int last_error = WSAEHOSTUNREACH;
-  for (auto *address = addresses; address != nullptr;
-       address = address->ai_next) {
-    connected_socket = ::socket(address->ai_family, address->ai_socktype,
-                                address->ai_protocol);
+  for (auto *address = addresses; address != nullptr; address = address->ai_next) {
+    connected_socket = ::socket(address->ai_family, address->ai_socktype, address->ai_protocol);
     if (connected_socket == INVALID_SOCKET) {
       last_error = ::WSAGetLastError();
       continue;
     }
-    if (::connect(connected_socket, address->ai_addr,
-                  static_cast<int>(address->ai_addrlen)) == 0) {
+    if (::connect(connected_socket, address->ai_addr, static_cast<int>(address->ai_addrlen)) == 0) {
       break;
     }
     last_error = ::WSAGetLastError();
@@ -119,8 +113,7 @@ void UdpTransport::send(const std::array<std::uint8_t, 8> request) {
   if (socket_ == kInvalidSocket) {
     throw std::runtime_error("UDP socket is not connected");
   }
-  const auto sent = ::send(native_socket(socket_),
-                           reinterpret_cast<const char *>(request.data()),
+  const auto sent = ::send(native_socket(socket_), reinterpret_cast<const char *>(request.data()),
                            static_cast<int>(request.size()), 0);
   if (sent == SOCKET_ERROR) {
     throw last_winsock_error("failed to send UDP request");
@@ -130,8 +123,7 @@ void UdpTransport::send(const std::array<std::uint8_t, 8> request) {
   }
 }
 
-std::size_t UdpTransport::receive(std::uint8_t *data,
-                                  const std::size_t capacity,
+std::size_t UdpTransport::receive(std::uint8_t *data, const std::size_t capacity,
                                   const std::chrono::duration<double> timeout) {
   SOCKET socket = INVALID_SOCKET;
   WaitStartedTestHook wait_started_hook = nullptr;
@@ -153,8 +145,7 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
   if (wait_started_hook != nullptr) {
     wait_started_hook(wait_started_context);
   }
-  const auto bounded_timeout =
-      std::max(timeout, std::chrono::duration<double>::zero());
+  const auto bounded_timeout = std::max(timeout, std::chrono::duration<double>::zero());
   const auto deadline = std::chrono::steady_clock::now() + bounded_timeout;
   constexpr int kShutdownCheckIntervalMilliseconds = 50;
   constexpr auto kShutdownCheckInterval =
@@ -169,16 +160,14 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
 
     const auto now = std::chrono::steady_clock::now();
     const auto remaining = deadline - now;
-    const auto poll_timeout =
-        remaining > std::chrono::steady_clock::duration::zero()
-            ? std::min(std::chrono::duration<double>{remaining},
-                       std::chrono::duration<double>{kShutdownCheckInterval})
-            : std::chrono::duration<double>::zero();
+    const auto poll_timeout = remaining > std::chrono::steady_clock::duration::zero()
+                                  ? std::min(std::chrono::duration<double>{remaining},
+                                             std::chrono::duration<double>{kShutdownCheckInterval})
+                                  : std::chrono::duration<double>::zero();
     descriptor.revents = 0;
     const int poll_result =
         ::WSAPoll(&descriptor, 1,
-                  std::min(kShutdownCheckIntervalMilliseconds,
-                           timeout_milliseconds(poll_timeout)));
+                  std::min(kShutdownCheckIntervalMilliseconds, timeout_milliseconds(poll_timeout)));
     if (poll_result == SOCKET_ERROR) {
       const int error = ::WSAGetLastError();
       if (error == WSAEINTR) {
@@ -204,10 +193,10 @@ std::size_t UdpTransport::receive(std::uint8_t *data,
                         socket_wait_error(socket, descriptor.revents));
   }
 
-  const auto bounded_capacity = std::min(
-      capacity, static_cast<std::size_t>(std::numeric_limits<int>::max()));
-  const auto received = ::recv(socket, reinterpret_cast<char *>(data),
-                               static_cast<int>(bounded_capacity), 0);
+  const auto bounded_capacity =
+      std::min(capacity, static_cast<std::size_t>(std::numeric_limits<int>::max()));
+  const auto received =
+      ::recv(socket, reinterpret_cast<char *>(data), static_cast<int>(bounded_capacity), 0);
   if (received == SOCKET_ERROR) {
     const int error = ::WSAGetLastError();
     {

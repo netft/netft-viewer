@@ -51,8 +51,8 @@ public:
     WSADATA data{};
     const int result = ::WSAStartup(MAKEWORD(2, 2), &data);
     if (result != 0) {
-      throw std::runtime_error("test WinSock startup failed (error " +
-                               std::to_string(result) + ")");
+      throw std::runtime_error("test WinSock startup failed (error " + std::to_string(result) +
+                               ")");
     }
 #endif
   }
@@ -67,12 +67,9 @@ public:
   SocketRuntime &operator=(const SocketRuntime &) = delete;
 };
 
-inline bool socket_is_valid(const NativeSocket socket) noexcept {
-  return socket != kInvalidSocket;
-}
+inline bool socket_is_valid(const NativeSocket socket) noexcept { return socket != kInvalidSocket; }
 
-inline NativeSocket create_socket(const int family, const int type,
-                                  const int protocol) noexcept {
+inline NativeSocket create_socket(const int family, const int type, const int protocol) noexcept {
   return ::socket(family, type, protocol);
 }
 
@@ -104,45 +101,36 @@ inline bool set_socket_nonblocking(const NativeSocket socket) noexcept {
 #endif
 }
 
-inline bool
-set_socket_receive_timeout(const NativeSocket socket,
-                           const std::chrono::milliseconds timeout) noexcept {
+inline bool set_socket_receive_timeout(const NativeSocket socket,
+                                       const std::chrono::milliseconds timeout) noexcept {
 #ifdef _WIN32
-  const auto bounded = std::min<std::int64_t>(
-      timeout.count(), std::numeric_limits<DWORD>::max());
-  const DWORD milliseconds =
-      static_cast<DWORD>(std::max<std::int64_t>(0, bounded));
+  const auto bounded = std::min<std::int64_t>(timeout.count(), std::numeric_limits<DWORD>::max());
+  const DWORD milliseconds = static_cast<DWORD>(std::max<std::int64_t>(0, bounded));
   return ::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
-                      reinterpret_cast<const char *>(&milliseconds),
-                      sizeof(milliseconds)) == 0;
+                      reinterpret_cast<const char *>(&milliseconds), sizeof(milliseconds)) == 0;
 #else
-  const auto seconds =
-      std::chrono::duration_cast<std::chrono::seconds>(timeout);
+  const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(timeout);
   const auto microseconds =
       std::chrono::duration_cast<std::chrono::microseconds>(timeout - seconds);
   const timeval value{static_cast<time_t>(seconds.count()),
                       static_cast<suseconds_t>(microseconds.count())};
-  return ::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) ==
-         0;
+  return ::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) == 0;
 #endif
 }
 
 inline bool set_socket_reuse_address(const NativeSocket socket) noexcept {
   const int enabled = 1;
 #ifdef _WIN32
-  return ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR,
-                      reinterpret_cast<const char *>(&enabled),
+  return ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&enabled),
                       sizeof(enabled)) == 0;
 #else
-  return ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &enabled,
-                      sizeof(enabled)) == 0;
+  return ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) == 0;
 #endif
 }
 
 inline std::string socket_error_message(const char *operation) {
 #ifdef _WIN32
-  return std::string{operation} + " (WinSock error " +
-         std::to_string(::WSAGetLastError()) + ")";
+  return std::string{operation} + " (WinSock error " + std::to_string(::WSAGetLastError()) + ")";
 #else
   return std::string{operation} + ": " + std::strerror(errno);
 #endif
@@ -158,48 +146,43 @@ inline int socket_send_flags() noexcept {
 
 inline std::size_t socket_io_size(const std::size_t size) noexcept {
 #ifdef _WIN32
-  return std::min(size,
-                  static_cast<std::size_t>(std::numeric_limits<int>::max()));
+  return std::min(size, static_cast<std::size_t>(std::numeric_limits<int>::max()));
 #else
   return size;
 #endif
 }
 
 inline std::ptrdiff_t send_socket(const NativeSocket socket, const void *data,
-                                  const std::size_t size,
-                                  const int flags = 0) noexcept {
+                                  const std::size_t size, const int flags = 0) noexcept {
   const auto bounded_size = socket_io_size(size);
 #ifdef _WIN32
   return static_cast<std::ptrdiff_t>(
-      ::send(socket, static_cast<const char *>(data),
-             static_cast<int>(bounded_size), flags));
+      ::send(socket, static_cast<const char *>(data), static_cast<int>(bounded_size), flags));
 #else
   return static_cast<std::ptrdiff_t>(::send(socket, data, bounded_size, flags));
 #endif
 }
 
-inline std::ptrdiff_t receive_socket(const NativeSocket socket, void *data,
-                                     const std::size_t size,
+inline std::ptrdiff_t receive_socket(const NativeSocket socket, void *data, const std::size_t size,
                                      const int flags = 0) noexcept {
   const auto bounded_size = socket_io_size(size);
 #ifdef _WIN32
-  return static_cast<std::ptrdiff_t>(::recv(socket, static_cast<char *>(data),
-                                            static_cast<int>(bounded_size),
-                                            flags));
+  return static_cast<std::ptrdiff_t>(
+      ::recv(socket, static_cast<char *>(data), static_cast<int>(bounded_size), flags));
 #else
   return static_cast<std::ptrdiff_t>(::recv(socket, data, bounded_size, flags));
 #endif
 }
 
-inline std::ptrdiff_t send_to_socket(const NativeSocket socket,
-                                     const void *data, const std::size_t size,
-                                     const int flags, const sockaddr *address,
+inline std::ptrdiff_t send_to_socket(const NativeSocket socket, const void *data,
+                                     const std::size_t size, const int flags,
+                                     const sockaddr *address,
                                      const SocketLength address_size) noexcept {
   const auto bounded_size = socket_io_size(size);
 #ifdef _WIN32
-  return static_cast<std::ptrdiff_t>(
-      ::sendto(socket, static_cast<const char *>(data),
-               static_cast<int>(bounded_size), flags, address, address_size));
+  return static_cast<std::ptrdiff_t>(::sendto(socket, static_cast<const char *>(data),
+                                              static_cast<int>(bounded_size), flags, address,
+                                              address_size));
 #else
   return static_cast<std::ptrdiff_t>(
       ::sendto(socket, data, bounded_size, flags, address, address_size));
@@ -207,14 +190,13 @@ inline std::ptrdiff_t send_to_socket(const NativeSocket socket,
 }
 
 inline std::ptrdiff_t receive_from_socket(const NativeSocket socket, void *data,
-                                          const std::size_t size,
-                                          const int flags, sockaddr *address,
-                                          SocketLength *address_size) noexcept {
+                                          const std::size_t size, const int flags,
+                                          sockaddr *address, SocketLength *address_size) noexcept {
   const auto bounded_size = socket_io_size(size);
 #ifdef _WIN32
-  return static_cast<std::ptrdiff_t>(
-      ::recvfrom(socket, static_cast<char *>(data),
-                 static_cast<int>(bounded_size), flags, address, address_size));
+  return static_cast<std::ptrdiff_t>(::recvfrom(socket, static_cast<char *>(data),
+                                                static_cast<int>(bounded_size), flags, address,
+                                                address_size));
 #else
   return static_cast<std::ptrdiff_t>(
       ::recvfrom(socket, data, bounded_size, flags, address, address_size));

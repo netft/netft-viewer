@@ -58,15 +58,14 @@ private:
   SessionOutcome receive_session();
   SensorConfiguration configuration_for_session();
   void apply_configuration(SensorConfiguration configuration);
-  std::optional<SessionResult>
-  handle_record(const detail::RawRecord &record,
-                std::chrono::steady_clock::time_point received_at);
+  std::optional<SessionResult> handle_record(const detail::RawRecord &record,
+                                             std::chrono::steady_clock::time_point received_at);
   void close_session() noexcept;
   void set_fault(FaultCode code, std::string message) noexcept;
   void record_callback_error(const char *message) noexcept;
   void finish_session() noexcept;
 
-  using ThreadFactory = std::thread (*)(Impl *);
+  using ThreadCreationHook = void (*)();
   using FaultPublishedHook = void (*)(Impl *) noexcept;
   using WaitWakeHook = void (*)(Impl *, std::uint64_t) noexcept;
 
@@ -80,7 +79,7 @@ private:
   mutable std::mutex data_mutex_;
   std::condition_variable first_sample_cv_;
   std::thread worker_;
-  ThreadFactory thread_factory_{nullptr};
+  ThreadCreationHook thread_creation_test_hook_{nullptr};
   // Internal synchronization hooks used only by lifecycle tests. Client's
   // installed API remains opaque and does not expose these seams.
   FaultPublishedHook fault_published_test_hook_{nullptr};

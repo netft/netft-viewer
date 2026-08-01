@@ -4,9 +4,9 @@ This repository carries an auditable source snapshot of the native `netft-cpp`
 library.
 
 - Upstream repository: `https://github.com/netft/netft-cpp.git`
-- Upstream release: `v0.3.1`
-- Upstream commit: `859eeda8b077093f9bc49d9c1e5506c334647e7b`
-- Snapshot date: `2026-07-31`
+- Upstream release: `v0.3.2`
+- Upstream commit: `95f0e721b885a2fc88e028f41987607747a42085`
+- Snapshot date: `2026-08-01`
 - Copied library paths: `include/netft/**` and `src/**`
 - Copied native-test support: `test/support/fake_http_server.*` and
   `test/support/fake_sensor.*`, plus their portable socket helper
@@ -25,22 +25,19 @@ portable socket test support, and their contract tests are now upstream
 
 ## Viewer-local integration
 
-The viewer intentionally retains only these local adaptations:
+The viewer intentionally retains only these local integration policies:
 
 - `core/netft/CMakeLists.txt` builds the snapshot as the private static target
   `netft_viewer_netft`; it is not installed or exported.
 - The top-level viewer dependency configuration supplies a pinned, minimal,
   static libcurl for application packaging. Upstream `netft-cpp` continues to
   use `find_package(CURL)` and does not inherit this application policy.
-- `include/netft/client.hpp`, `src/client.cpp`,
-  and `src/detail/client_impl.{hpp,cpp}` retain the viewer's deferred
-  destruction behavior when a `Client` is destroyed from its own sample
-  callback. Viewer integration tests cover this local lifecycle contract,
-  which is not part of upstream `netft-cpp`.
-- Snapshot sources retain the viewer repository's established formatting.
-  Whitespace-only differences are not behavioral overlays.
+- The copied headers, sources, and test-support files are not modified. Client
+  destruction from a sample callback is part of upstream `netft-cpp` v0.3.2,
+  so the former viewer-owned lifecycle overlay has been removed.
 
-No public transport API differs from the recorded upstream commit.
+No copied core API or implementation differs from the recorded upstream
+commit. Machine-readable provenance is stored in `core/netft/UPSTREAM`.
 
 ## Manual synchronization procedure
 
@@ -53,12 +50,10 @@ No public transport API differs from the recorded upstream commit.
 4. From `test/support`, copy only `fake_http_server.*`, `fake_sensor.*`, and
    `socket_runtime.hpp`, which support the viewer's session integration tests.
    Upstream core unit tests remain owned and executed by `netft-cpp`.
-5. Reapply only the viewer-local lifecycle adaptation listed above. Keep the
-   viewer's dependency and CMake integration files rather than copying
-   upstream packaging configuration.
-6. Compare every other snapshot file against the commit with
-   `git diff --no-index --ignore-all-space`. Any non-whitespace difference
-   outside the listed lifecycle files must be resolved before updating this
-   document.
+5. Keep the viewer's dependency and CMake integration files rather than
+   copying upstream packaging configuration.
+6. Compare every copied file byte-for-byte against the recorded commit. Any
+   difference must be resolved before updating this document and
+   `core/netft/UPSTREAM`.
 7. Confirm the excluded paths are absent, then run `pixi run native-configure`,
    `pixi run native-build`, and `pixi run native-test` before committing.

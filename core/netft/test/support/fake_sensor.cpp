@@ -15,16 +15,13 @@ constexpr std::string_view kDefaultXml = R"xml(
 <netft><prodname>Fake Net F/T</prodname><cfgcpf>1000000</cfgcpf>
 <cfgcpt>1000000</cfgcpt><scfgfu>N</scfgfu><scfgtu>Nm</scfgtu></netft>)xml";
 
-void put_u32(std::vector<std::uint8_t> &bytes, std::size_t offset,
-             std::uint32_t value) {
+void put_u32(std::vector<std::uint8_t> &bytes, std::size_t offset, std::uint32_t value) {
   for (unsigned index = 0; index < 4; ++index) {
-    bytes[offset + index] =
-        static_cast<std::uint8_t>(value >> (24U - 8U * index));
+    bytes[offset + index] = static_cast<std::uint8_t>(value >> (24U - 8U * index));
   }
 }
 
-std::vector<std::uint8_t> make_record(const std::uint32_t rdt_sequence,
-                                      const std::uint32_t status,
+std::vector<std::uint8_t> make_record(const std::uint32_t rdt_sequence, const std::uint32_t status,
                                       const std::uint32_t ft_sequence,
                                       const std::array<std::int32_t, 6> &axes) {
   std::vector<std::uint8_t> data(36);
@@ -37,13 +34,11 @@ std::vector<std::uint8_t> make_record(const std::uint32_t rdt_sequence,
   return data;
 }
 
-std::optional<detail::Command> decode_command(const std::uint8_t *data,
-                                              const std::size_t size) {
+std::optional<detail::Command> decode_command(const std::uint8_t *data, const std::size_t size) {
   if (size != 8 || data[0] != 0x12 || data[1] != 0x34) {
     return std::nullopt;
   }
-  return static_cast<detail::Command>(
-      (static_cast<std::uint16_t>(data[2]) << 8U) | data[3]);
+  return static_cast<detail::Command>((static_cast<std::uint16_t>(data[2]) << 8U) | data[3]);
 }
 
 } // namespace
@@ -55,8 +50,8 @@ struct FakeSensor::NetworkState {
 };
 
 FakeSensor::FakeSensor(const double rate_hz)
-    : http_(std::string{kDefaultXml}),
-      network_(std::make_unique<NetworkState>()), rate_hz_(rate_hz) {
+    : http_(std::string{kDefaultXml}), network_(std::make_unique<NetworkState>()),
+      rate_hz_(rate_hz) {
   network_->socket = create_socket(AF_INET, SOCK_DGRAM, 0);
   if (!socket_is_valid(network_->socket)) {
     throw std::runtime_error("fake sensor socket failed");
@@ -75,8 +70,7 @@ FakeSensor::FakeSensor(const double rate_hz)
     throw std::runtime_error("fake sensor bind failed");
   }
   SocketLength address_size = sizeof(address);
-  if (::getsockname(network_->socket, reinterpret_cast<sockaddr *>(&address),
-                    &address_size) != 0) {
+  if (::getsockname(network_->socket, reinterpret_cast<sockaddr *>(&address), &address_size) != 0) {
     close_socket(network_->socket);
     throw std::runtime_error("fake sensor getsockname failed");
   }
@@ -111,16 +105,13 @@ void FakeSensor::send_payload_now(std::vector<std::uint8_t> payload) {
     }
     peer = network_->client;
   }
-  static_cast<void>(send_to_socket(network_->socket, payload.data(),
-                                   payload.size(), 0,
+  static_cast<void>(send_to_socket(network_->socket, payload.data(), payload.size(), 0,
                                    reinterpret_cast<sockaddr *>(&peer),
                                    static_cast<SocketLength>(sizeof(peer))));
 }
 
-void FakeSensor::queue_record(const std::uint32_t rdt_sequence,
-                              const std::uint32_t status,
-                              std::uint32_t ft_sequence,
-                              const std::array<std::int32_t, 6> axes) {
+void FakeSensor::queue_record(const std::uint32_t rdt_sequence, const std::uint32_t status,
+                              std::uint32_t ft_sequence, const std::array<std::int32_t, 6> axes) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (ft_sequence == 0) {
     ft_sequence = ft_;
@@ -129,8 +120,7 @@ void FakeSensor::queue_record(const std::uint32_t rdt_sequence,
   payloads_.push_back(make_record(rdt_sequence, status, ft_sequence, axes));
 }
 
-void FakeSensor::send_record_now(const std::uint32_t rdt_sequence,
-                                 const std::uint32_t status,
+void FakeSensor::send_record_now(const std::uint32_t rdt_sequence, const std::uint32_t status,
                                  std::uint32_t ft_sequence,
                                  const std::array<std::int32_t, 6> axes) {
   {
@@ -148,9 +138,8 @@ void FakeSensor::skip_rdt(const unsigned count) noexcept {
   skip_ += count;
 }
 
-bool FakeSensor::wait_for_command(
-    const detail::Command command, const unsigned count,
-    const std::chrono::milliseconds timeout) const {
+bool FakeSensor::wait_for_command(const detail::Command command, const unsigned count,
+                                  const std::chrono::milliseconds timeout) const {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   do {
     const auto observed = commands();
@@ -163,8 +152,8 @@ bool FakeSensor::wait_for_command(
   return false;
 }
 
-bool FakeSensor::wait_for_http_request(
-    const unsigned count, const std::chrono::milliseconds timeout) const {
+bool FakeSensor::wait_for_http_request(const unsigned count,
+                                       const std::chrono::milliseconds timeout) const {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   do {
     if (http_request_count() >= count) {
@@ -189,8 +178,7 @@ void FakeSensor::set_xml_configuration(std::string xml, const int status) {
   http_.set_response(std::move(xml), status);
 }
 
-void FakeSensor::set_http_response_delay(
-    const std::chrono::milliseconds delay) {
+void FakeSensor::set_http_response_delay(const std::chrono::milliseconds delay) {
   http_.set_response_delay(delay);
 }
 
@@ -225,32 +213,28 @@ void FakeSensor::send_next() {
       put_u32(data, 32, 30);
     }
   }
-  static_cast<void>(send_to_socket(network_->socket, data.data(), data.size(),
-                                   0, reinterpret_cast<sockaddr *>(&peer),
+  static_cast<void>(send_to_socket(network_->socket, data.data(), data.size(), 0,
+                                   reinterpret_cast<sockaddr *>(&peer),
                                    static_cast<SocketLength>(sizeof(peer))));
 }
 
 void FakeSensor::run() {
   auto next = std::chrono::steady_clock::now();
-  const auto interval =
-      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-          std::chrono::duration<double>{1.0 / rate_hz_});
+  const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>{1.0 / rate_hz_});
   while (!stopping_) {
     sockaddr_in peer{};
     SocketLength peer_size = sizeof(peer);
     std::array<std::uint8_t, 64> data{};
-    const auto size =
-        receive_from_socket(network_->socket, data.data(), data.size(), 0,
-                            reinterpret_cast<sockaddr *>(&peer), &peer_size);
+    const auto size = receive_from_socket(network_->socket, data.data(), data.size(), 0,
+                                          reinterpret_cast<sockaddr *>(&peer), &peer_size);
     if (size > 0) {
-      const auto command =
-          decode_command(data.data(), static_cast<std::size_t>(size));
+      const auto command = decode_command(data.data(), static_cast<std::size_t>(size));
       if (command) {
         {
           std::lock_guard<std::mutex> lock(mutex_);
           commands_.push_back(*command);
-          command_events_.push_back(
-              {*command, std::chrono::steady_clock::now()});
+          command_events_.push_back({*command, std::chrono::steady_clock::now()});
           if (*command == detail::Command::StartRealtime) {
             network_->client = peer;
             has_client_ = true;

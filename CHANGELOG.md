@@ -7,6 +7,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Update the private core snapshot to netft-cpp v0.3.2 and remove the former
+  viewer-owned callback-destruction overlay now provided upstream.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added

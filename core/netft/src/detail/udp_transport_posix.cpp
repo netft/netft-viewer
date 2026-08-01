@@ -15,8 +15,7 @@ namespace netft::detail {
 namespace {
 
 std::runtime_error socket_error(const char *operation) {
-  return std::runtime_error(std::string{operation} + ": " +
-                            std::strerror(errno));
+  return std::runtime_error(std::string{operation} + ": " + std::strerror(errno));
 }
 
 int timeout_milliseconds(const std::chrono::duration<double> timeout) {
@@ -39,25 +38,20 @@ void UdpTransport::connect(const std::string &host, const int port) {
   hints.ai_socktype = SOCK_DGRAM;
   addrinfo *addresses = nullptr;
   const auto service = std::to_string(port);
-  const int result =
-      ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
+  const int result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses);
   if (result != 0) {
-    throw std::runtime_error(std::string{"failed to resolve sensor: "} +
-                             ::gai_strerror(result));
+    throw std::runtime_error(std::string{"failed to resolve sensor: "} + ::gai_strerror(result));
   }
 
   int connected_socket = -1;
   int last_error = 0;
-  for (auto *address = addresses; address != nullptr;
-       address = address->ai_next) {
-    connected_socket = ::socket(address->ai_family, address->ai_socktype,
-                                address->ai_protocol);
+  for (auto *address = addresses; address != nullptr; address = address->ai_next) {
+    connected_socket = ::socket(address->ai_family, address->ai_socktype, address->ai_protocol);
     if (connected_socket < 0) {
       last_error = errno;
       continue;
     }
-    if (::connect(connected_socket, address->ai_addr, address->ai_addrlen) ==
-        0) {
+    if (::connect(connected_socket, address->ai_addr, address->ai_addrlen) == 0) {
       break;
     }
     last_error = errno;
@@ -84,8 +78,7 @@ void UdpTransport::send(const std::array<std::uint8_t, 8> request) {
   if (socket_ == kInvalidSocket) {
     throw std::runtime_error("UDP socket is not connected");
   }
-  const auto sent =
-      ::send(static_cast<int>(socket_), request.data(), request.size(), 0);
+  const auto sent = ::send(static_cast<int>(socket_), request.data(), request.size(), 0);
   if (sent < 0) {
     throw socket_error("failed to send UDP request");
   }
@@ -94,8 +87,7 @@ void UdpTransport::send(const std::array<std::uint8_t, 8> request) {
   }
 }
 
-std::size_t UdpTransport::receive(std::uint8_t *data,
-                                  const std::size_t capacity,
+std::size_t UdpTransport::receive(std::uint8_t *data, const std::size_t capacity,
                                   const std::chrono::duration<double> timeout) {
   int socket = -1;
   WaitStartedTestHook wait_started_hook = nullptr;

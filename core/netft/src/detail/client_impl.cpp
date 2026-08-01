@@ -70,8 +70,7 @@ namespace {
 bool same_calibration(const Calibration &left, const Calibration &right) {
   return left.counts_per_force_unit == right.counts_per_force_unit &&
          left.counts_per_torque_unit == right.counts_per_torque_unit &&
-         left.force_unit == right.force_unit &&
-         left.torque_unit == right.torque_unit;
+         left.force_unit == right.force_unit && left.torque_unit == right.torque_unit;
 }
 
 void prune_rate_window(std::deque<std::chrono::steady_clock::time_point> &times,
@@ -146,10 +145,8 @@ void Client::Impl::start(SampleCallback callback) {
         std::chrono::steady_clock::time_point previous_last_record;
         std::uint64_t previous_generation{};
         std::uint64_t previous_delivered_generation{};
-        std::deque<std::chrono::steady_clock::time_point>
-            previous_receive_times;
-        std::deque<std::chrono::steady_clock::time_point>
-            previous_delivery_times;
+        std::deque<std::chrono::steady_clock::time_point> previous_receive_times;
+        std::deque<std::chrono::steady_clock::time_point> previous_delivery_times;
         std::uint64_t previous_consecutive_malformed{};
         {
           std::scoped_lock data_lock(data_mutex_);
@@ -202,8 +199,7 @@ void Client::Impl::start(SampleCallback callback) {
           }
           fault_latch_.reset();
           if (previous_fault != FaultCode::None) {
-            static_cast<void>(fault_latch_.publish(previous_fault,
-                                                   previous_health.last_error,
+            static_cast<void>(fault_latch_.publish(previous_fault, previous_health.last_error,
                                                    data_mutex_, health_));
           }
           first_sample_cv_.notify_all();
@@ -228,8 +224,8 @@ void Client::Impl::start(SampleCallback callback) {
 }
 
 std::thread Client::Impl::create_worker_thread() {
-  if (thread_factory_ != nullptr) {
-    return thread_factory_(this);
+  if (thread_creation_test_hook_ != nullptr) {
+    thread_creation_test_hook_();
   }
   return std::thread([this] { run(); });
 }
@@ -246,8 +242,7 @@ void Client::Impl::stop() noexcept {
         std::scoped_lock command_lock(command_mutex_);
         if (session_started_) {
           try {
-            transport_.send(
-                detail::encode_request(detail::Command::StopStreaming));
+            transport_.send(detail::encode_request(detail::Command::StopStreaming));
           } catch (...) {
             static_cast<void>(0);
           }
@@ -301,8 +296,7 @@ void Client::Impl::bias() {
   std::scoped_lock record_lock(record_mutex_);
   {
     std::scoped_lock data_lock(data_mutex_);
-    if (stopping_ || !session_started_ || faulted() ||
-        health_.state != ClientState::Streaming) {
+    if (stopping_ || !session_started_ || faulted() || health_.state != ClientState::Streaming) {
       throw NotConnectedError("client is not streaming");
     }
   }
@@ -311,17 +305,15 @@ void Client::Impl::bias() {
   rdt_sequence_.reset();
 }
 
-bool Client::Impl::wait_for_first_sample(
-    const std::chrono::duration<double> timeout) {
+bool Client::Impl::wait_for_first_sample(const std::chrono::duration<double> timeout) {
   std::unique_lock<std::mutex> data_lock(data_mutex_);
   const auto captured_generation = generation_;
   if (captured_generation == 0) {
     return false;
   }
   first_sample_cv_.wait_for(data_lock, timeout, [this, captured_generation] {
-    return generation_ != captured_generation ||
-           delivered_generation_ == captured_generation || stopping_ ||
-           faulted();
+    return generation_ != captured_generation || delivered_generation_ == captured_generation ||
+           stopping_ || faulted();
   });
   if (const auto hook = wait_wake_test_hook_) {
     data_lock.unlock();
@@ -336,9 +328,7 @@ bool Client::Impl::wait_for_first_sample(
 
 bool Client::Impl::faulted() const noexcept { return fault_latch_.faulted(); }
 
-FaultCode Client::Impl::fault_code() const noexcept {
-  return fault_latch_.code();
-}
+FaultCode Client::Impl::fault_code() const noexcept { return fault_latch_.code(); }
 
 HealthSnapshot Client::Impl::health() const {
   std::scoped_lock data_lock(data_mutex_);
@@ -365,8 +355,7 @@ std::optional<Sample> Client::Impl::latest_sample() const {
 
 SensorConfiguration Client::Impl::configuration_for_session() {
   if (config_.calibration_override) {
-    return SensorConfiguration{"", *config_.calibration_override,
-                               CalibrationSource::Override, 1};
+    return SensorConfiguration{"", *config_.calibration_override, CalibrationSource::Override, 1};
   }
   DiscoveryOptions options;
   options.sensor_host = config_.sensor_host;
@@ -422,8 +411,7 @@ void Client::Impl::run() noexcept {
       }
 
       std::unique_lock<std::mutex> data_lock(data_mutex_);
-      first_sample_cv_.wait_for(data_lock, backoff,
-                                [this] { return stopping_.load(); });
+      first_sample_cv_.wait_for(data_lock, backoff, [this] { return stopping_.load(); });
       data_lock.unlock();
       backoff = std::min(backoff * 2.0, config_.reconnect_max_delay);
     }
@@ -452,9 +440,8 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
   try {
     apply_configuration(configuration_for_session());
   } catch (const DiscoveryError &error) {
-    return {stopping_ ? SessionResult::Stopped
-                      : SessionResult::SensorConfiguration,
-            error.what(), false};
+    return {stopping_ ? SessionResult::Stopped : SessionResult::SensorConfiguration, error.what(),
+            false};
   }
   if (stopping_) {
     return {SessionResult::Stopped, {}, false};
@@ -469,8 +456,7 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     transport_.send(detail::encode_request(detail::Command::StartRealtime));
     session_started_ = true;
   } catch (const std::exception &error) {
-    return {stopping_ ? SessionResult::Stopped : SessionResult::Socket,
-            error.what(), false};
+    return {stopping_ ? SessionResult::Stopped : SessionResult::Socket, error.what(), false};
   }
 
   {
@@ -497,8 +483,8 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
     try {
       size = transport_.receive(buffer.data(), buffer.size(), deadline - now);
     } catch (const std::exception &error) {
-      return {stopping_ ? SessionResult::Stopped : SessionResult::Socket,
-              error.what(), received_valid_record};
+      return {stopping_ ? SessionResult::Stopped : SessionResult::Socket, error.what(),
+              received_valid_record};
     }
     if (stopping_) {
       return {SessionResult::Stopped, {}, received_valid_record};
@@ -538,9 +524,9 @@ Client::Impl::SessionOutcome Client::Impl::receive_session() {
   return {SessionResult::Stopped, {}, received_valid_record};
 }
 
-std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
-    const detail::RawRecord &record,
-    const std::chrono::steady_clock::time_point received_at) {
+std::optional<Client::Impl::SessionResult>
+Client::Impl::handle_record(const detail::RawRecord &record,
+                            const std::chrono::steady_clock::time_point received_at) {
   SensorConfiguration configuration;
   bool deliver = true;
   std::optional<SessionResult> outcome;
@@ -553,8 +539,7 @@ std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
     {
       std::scoped_lock data_lock(data_mutex_);
       if (!health_.sensor_configuration) {
-        throw std::logic_error(
-            "sensor configuration is unavailable while streaming");
+        throw std::logic_error("sensor configuration is unavailable while streaming");
       }
       configuration = *health_.sensor_configuration;
       health_.state = ClientState::Streaming;
@@ -615,13 +600,11 @@ std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
       }
 
       const bool ft_discontinuity =
-          ft.kind == detail::FtSequenceKind::Stall ||
-          ft.kind == detail::FtSequenceKind::Backward;
+          ft.kind == detail::FtSequenceKind::Stall || ft.kind == detail::FtSequenceKind::Backward;
       if (ft_discontinuity) {
         deliver = false;
         if (config_.recovery_policy == RecoveryPolicy::Reconnect &&
-            (outcome == SessionResult::FtStall ||
-             outcome == SessionResult::FtBackward)) {
+            (outcome == SessionResult::FtStall || outcome == SessionResult::FtBackward)) {
           outcome.reset();
         }
       }
@@ -629,8 +612,7 @@ std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
       if (deliver && config_.sample_rate_limit_hz > 0.0 &&
           last_delivery_at_ != std::chrono::steady_clock::time_point{} &&
           received_at - last_delivery_at_ <
-              std::chrono::duration<double>{1.0 /
-                                            config_.sample_rate_limit_hz}) {
+              std::chrono::duration<double>{1.0 / config_.sample_rate_limit_hz}) {
         deliver = false;
         ++health_.rate_limited_count;
       }
@@ -647,8 +629,7 @@ std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
   sample.rdt_sequence = record.rdt_sequence;
   sample.ft_sequence = record.ft_sequence;
   sample.status = record.status;
-  sample.raw_wrench = {record.fx, record.fy, record.fz,
-                       record.tx, record.ty, record.tz};
+  sample.raw_wrench = {record.fx, record.fy, record.fz, record.tx, record.ty, record.tz};
   sample.force = {record.fx / calibration.counts_per_force_unit,
                   record.fy / calibration.counts_per_force_unit,
                   record.fz / calibration.counts_per_force_unit};
@@ -697,8 +678,7 @@ std::optional<Client::Impl::SessionResult> Client::Impl::handle_record(
 }
 
 void Client::Impl::set_fault(FaultCode code, std::string message) noexcept {
-  const bool published =
-      fault_latch_.publish(code, std::move(message), data_mutex_, health_);
+  const bool published = fault_latch_.publish(code, std::move(message), data_mutex_, health_);
   first_sample_cv_.notify_all();
   lifecycle_cv_.notify_all();
   if (published) {

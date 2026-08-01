@@ -28,8 +28,8 @@ int wait_for_readable(const NativeSocket socket) noexcept {
 
 void send_all(const NativeSocket socket, std::string_view data) noexcept {
   while (!data.empty()) {
-    const auto sent = netft::test::send_socket(
-        socket, data.data(), data.size(), netft::test::socket_send_flags());
+    const auto sent = netft::test::send_socket(socket, data.data(), data.size(),
+                                               netft::test::socket_send_flags());
     if (sent <= 0) {
       return;
     }
@@ -56,17 +56,14 @@ struct FakeHttpServer::Impl {
     if (::bind(listener, reinterpret_cast<const sockaddr *>(&address),
                static_cast<netft::test::SocketLength>(sizeof(address))) != 0 ||
         ::listen(listener, 8) != 0) {
-      const auto error =
-          netft::test::socket_error_message("fake HTTP server bind failed");
+      const auto error = netft::test::socket_error_message("fake HTTP server bind failed");
       netft::test::close_socket(listener);
       throw std::runtime_error("failed to bind fake HTTP server: " + error);
     }
 
     netft::test::SocketLength address_length = sizeof(address);
-    if (::getsockname(listener, reinterpret_cast<sockaddr *>(&address),
-                      &address_length) != 0) {
-      const auto error = netft::test::socket_error_message(
-          "fake HTTP server getsockname failed");
+    if (::getsockname(listener, reinterpret_cast<sockaddr *>(&address), &address_length) != 0) {
+      const auto error = netft::test::socket_error_message("fake HTTP server getsockname failed");
       netft::test::close_socket(listener);
       throw std::runtime_error("failed to inspect fake HTTP server: " + error);
     }
@@ -120,8 +117,7 @@ struct FakeHttpServer::Impl {
   void handle_request(const NativeSocket client) noexcept {
     std::string request;
     char buffer[1024];
-    while (request.size() < 8192 &&
-           request.find("\r\n\r\n") == std::string::npos) {
+    while (request.size() < 8192 && request.find("\r\n\r\n") == std::string::npos) {
       if (stopping.load()) {
         return;
       }
@@ -132,8 +128,7 @@ struct FakeHttpServer::Impl {
       if (readiness == 0) {
         continue;
       }
-      const auto received =
-          netft::test::receive_socket(client, buffer, sizeof(buffer));
+      const auto received = netft::test::receive_socket(client, buffer, sizeof(buffer));
       if (received <= 0) {
         return;
       }
@@ -160,21 +155,18 @@ struct FakeHttpServer::Impl {
 
     if (response_delay.count() > 0) {
       std::unique_lock<std::mutex> lock(response_mutex);
-      if (response_changed.wait_for(lock, response_delay,
-                                    [this] { return stopping.load(); })) {
+      if (response_changed.wait_for(lock, response_delay, [this] { return stopping.load(); })) {
         return;
       }
     }
 
     const std::string reason = response_status == 200 ? "OK" : "Error";
     const std::string location_header =
-        response_location.empty() ? std::string{}
-                                  : "Location: " + response_location + "\r\n";
-    const std::string headers =
-        "HTTP/1.1 " + std::to_string(response_status) + " " + reason + "\r\n" +
-        "Content-Type: application/xml\r\n" + location_header +
-        "Content-Length: " + std::to_string(response_body.size()) + "\r\n" +
-        "Connection: close\r\n\r\n";
+        response_location.empty() ? std::string{} : "Location: " + response_location + "\r\n";
+    const std::string headers = "HTTP/1.1 " + std::to_string(response_status) + " " + reason +
+                                "\r\n" + "Content-Type: application/xml\r\n" + location_header +
+                                "Content-Length: " + std::to_string(response_body.size()) + "\r\n" +
+                                "Connection: close\r\n\r\n";
     send_all(client, headers);
     send_all(client, response_body);
   }
@@ -205,9 +197,7 @@ std::string FakeHttpServer::host() const { return "127.0.0.1"; }
 
 int FakeHttpServer::port() const { return impl_->listening_port; }
 
-std::uint64_t FakeHttpServer::request_count() const noexcept {
-  return impl_->requests.load();
-}
+std::uint64_t FakeHttpServer::request_count() const noexcept { return impl_->requests.load(); }
 
 std::uint64_t FakeHttpServer::accepted_connection_count() const noexcept {
   return impl_->accepted_connections.load();
