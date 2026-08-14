@@ -25,6 +25,7 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
 import { verifyCompanion } from "./lib/companion-handshake.mjs";
+import { readCoreSnapshot } from "./lib/core-snapshot.mjs";
 
 const run = async (command, arguments_, options = {}) =>
   new Promise((resolvePromise, rejectPromise) => {
@@ -68,12 +69,8 @@ const rejectSymlinks = async (root) => {
 
 const readIdentity = async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-  const snapshotDocument = await readFile("CORE_SNAPSHOT.md", "utf8");
-  const coreSnapshot = snapshotDocument.match(/\b[0-9a-f]{40}\b/)?.[0];
-  if (
-    typeof packageJson.version !== "string" ||
-    !/^[0-9a-f]{40}$/.test(coreSnapshot ?? "")
-  ) {
+  const coreSnapshot = await readCoreSnapshot();
+  if (typeof packageJson.version !== "string") {
     throw new Error("application companion identity is unavailable");
   }
   return { appVersion: packageJson.version, coreSnapshot };

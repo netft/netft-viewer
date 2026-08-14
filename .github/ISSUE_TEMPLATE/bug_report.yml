@@ -12,8 +12,7 @@ body:
     id: version
     attributes:
       label: Viewer version
-      description: Use the installed version or commit ID.
-      placeholder: 0.1.0
+      description: Use the version shown in Help > About or a commit ID.
     validations:
       required: true
   - type: dropdown

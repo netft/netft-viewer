@@ -15,6 +15,7 @@ import { extractFile, listPackage } from "@electron/asar";
 
 import { verifyBinaryArchitecture } from "./binary-inspection.mjs";
 import { verifyCompanion } from "./companion-handshake.mjs";
+import { readCoreSnapshot } from "./core-snapshot.mjs";
 import { assertPlatformArchitecture } from "./platform.mjs";
 
 const MAXIMUM_SCAN_FILES = 4096;
@@ -82,12 +83,8 @@ export const verifyDistributedNotices = async (
 
 export const readApplicationIdentity = async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-  const snapshotDocument = await readFile("CORE_SNAPSHOT.md", "utf8");
-  const coreSnapshot = snapshotDocument.match(/\b[0-9a-f]{40}\b/)?.[0];
-  if (
-    typeof packageJson.version !== "string" ||
-    !/^[0-9a-f]{40}$/.test(coreSnapshot ?? "")
-  ) {
+  const coreSnapshot = await readCoreSnapshot();
+  if (typeof packageJson.version !== "string") {
     throw new Error("application companion identity is unavailable");
   }
   return { appVersion: packageJson.version, coreSnapshot };
@@ -243,9 +240,11 @@ export const verifyPackageLayout = async ({
     join(".vite", "build", "main.js"),
   ).toString("utf8");
   for (const forbidden of [
+    "NETFT_VIEWER_E2E_APP_VERSION",
     "NETFT_VIEWER_E2E_BUILD",
     "NETFT_VIEWER_E2E_CONTROL_FILE",
     "NETFT_VIEWER_E2E_CONTROL_TOKEN",
+    "NETFT_VIEWER_E2E_CORE_SNAPSHOT",
     "NETFT_VIEWER_E2E_FAILURE_SENTINEL",
     "fake-companion.mjs",
   ]) {

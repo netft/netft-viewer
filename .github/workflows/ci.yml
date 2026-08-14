@@ -54,6 +54,9 @@ jobs:
       - id: typecheck
         name: Type check
         run: pnpm typecheck
+      - id: versions
+        name: Check version metadata
+        run: pnpm check:versions
       - id: project
         name: Test project contracts
         run: pnpm test:project

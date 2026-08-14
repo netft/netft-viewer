@@ -7,6 +7,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Derive the Electron and native backend identities from the same core snapshot
+  manifest, and verify installed Debian packages by starting their real backend.
+
 ### Changed
 
 - Update the private core snapshot to netft-cpp v0.3.3 and remove the former

@@ -13,6 +13,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { readCoreSnapshot } from "../../tools/lib/core-snapshot.mjs";
+
 interface ControlEndpoint {
   pid: number;
   port: number;
@@ -183,12 +185,20 @@ export const test = base.extend<{ viewer: ViewerFixture }>({
     const pageErrors: string[] = [];
     let app: ElectronApplication | undefined;
     try {
+      const coreSnapshot = await readCoreSnapshot();
+      const packageVersion = (
+        JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+          version: string;
+        }
+      ).version;
       app = await electron.launch({
         executablePath: packagedExecutable(),
         args: [`--user-data-dir=${userData}`],
         env: {
           ...process.env,
+          NETFT_VIEWER_E2E_APP_VERSION: packageVersion,
           NETFT_VIEWER_E2E_CONTROL_FILE: controlFile,
+          NETFT_VIEWER_E2E_CORE_SNAPSHOT: coreSnapshot,
           NETFT_VIEWER_E2E_CONTROL_TOKEN: token,
           NETFT_VIEWER_E2E_FAILURE_SENTINEL: failureSentinel,
         },

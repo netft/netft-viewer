@@ -46,9 +46,11 @@ test(
     const builtMain = await readFile(resolve(".vite/build/main.js"), "utf8");
     for (const forbidden of [
       "fake-companion.mjs",
+      "NETFT_VIEWER_E2E_APP_VERSION",
       "NETFT_VIEWER_E2E_BUILD",
       "NETFT_VIEWER_E2E_CONTROL_FILE",
       "NETFT_VIEWER_E2E_CONTROL_TOKEN",
+      "NETFT_VIEWER_E2E_CORE_SNAPSHOT",
       "NETFT_VIEWER_E2E_FAILURE_SENTINEL",
     ]) {
       assert.equal(packagedMain.includes(forbidden), false);

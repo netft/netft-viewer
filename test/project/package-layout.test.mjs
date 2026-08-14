@@ -19,15 +19,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
+import { readCoreSnapshot } from "../../tools/lib/core-snapshot.mjs";
+
 const packageDirectory = process.env.NETFT_VIEWER_PACKAGE_DIR;
 const packageTestOptions = { skip: packageDirectory === undefined };
 const packageArchitecture =
   process.env.NETFT_VIEWER_PACKAGE_ARCHITECTURE ?? process.arch;
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-const expectedSnapshot = (await readFile("CORE_SNAPSHOT.md", "utf8")).match(
-  /\b[0-9a-f]{40}\b/,
-)?.[0];
-assert.notEqual(expectedSnapshot, undefined);
+const expectedSnapshot = await readCoreSnapshot();
 
 const runCompanionHandshake = async (executable) => {
   const requestId = "package-layout";

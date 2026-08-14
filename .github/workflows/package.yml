@@ -53,7 +53,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes cmake ninja-build fakeroot dpkg-dev patchelf
+          sudo apt-get install --yes cmake ninja-build fakeroot dpkg-dev patchelf xvfb
       - id: toolchain
         name: Verify packaging toolchain
         shell: pwsh
@@ -88,6 +88,15 @@ jobs:
       - id: verify-artifacts
         name: Verify installer contents and native companion
         run: node tools/verify-package-artifacts.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
+      - id: installed-deb-smoke
+        name: Install Debian package and start real backend
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          deb="$(find "out/make/deb/${{ matrix.architecture }}" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$deb"
+          sudo apt-get install --yes "$deb"
+          xvfb-run --auto-servernum node test/e2e/production-backend-smoke.mjs /usr/bin/netft-viewer
       - id: artifact-manifest
         name: Resolve artifact paths
         run: node tools/write-artifact-manifest.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out

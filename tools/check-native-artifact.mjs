@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import { verifyBinaryArchitecture } from "./lib/binary-inspection.mjs";
 import { verifyCompanion } from "./lib/companion-handshake.mjs";
+import { readCoreSnapshot } from "./lib/core-snapshot.mjs";
 import { assertPlatformArchitecture } from "./lib/platform.mjs";
 
 const runCapture = async (command, arguments_) =>
@@ -201,12 +202,8 @@ export const validateDependencyReport = ({ platform, output }) => {
 
 const readIdentity = async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-  const snapshotDocument = await readFile("CORE_SNAPSHOT.md", "utf8");
-  const coreSnapshot = snapshotDocument.match(/\b[0-9a-f]{40}\b/)?.[0];
-  if (
-    typeof packageJson.version !== "string" ||
-    !/^[0-9a-f]{40}$/.test(coreSnapshot ?? "")
-  ) {
+  const coreSnapshot = await readCoreSnapshot();
+  if (typeof packageJson.version !== "string") {
     throw new Error("application companion identity is unavailable");
   }
   return { appVersion: packageJson.version, coreSnapshot };

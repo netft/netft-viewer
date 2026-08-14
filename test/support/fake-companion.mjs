@@ -3,14 +3,16 @@
 import { appendFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 
-const APP_VERSION = "0.1.0";
-const CORE_SNAPSHOT = "46ee05639f818a17c1cfe604d0d77b1feb8f9b2b";
+const APP_VERSION = process.env.NETFT_VIEWER_E2E_APP_VERSION;
+const CORE_SNAPSHOT = process.env.NETFT_VIEWER_E2E_CORE_SNAPSHOT;
 const MAXIMUM_CONTROL_BYTES = 64 * 1024;
 const controlFile = process.env.NETFT_VIEWER_E2E_CONTROL_FILE;
 const controlToken = process.env.NETFT_VIEWER_E2E_CONTROL_TOKEN;
 const failureSentinel = process.env.NETFT_VIEWER_E2E_FAILURE_SENTINEL;
 
 if (
+  !/^\d+\.\d+\.\d+$/.test(APP_VERSION ?? "") ||
+  !/^[0-9a-f]{40}$/.test(CORE_SNAPSHOT ?? "") ||
   !controlFile ||
   !controlToken ||
   controlToken.length < 32 ||

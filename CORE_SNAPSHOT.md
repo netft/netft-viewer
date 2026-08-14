@@ -4,8 +4,6 @@ This repository carries an auditable source snapshot of the native `netft-cpp`
 library.
 
 - Upstream repository: `https://github.com/netft/netft-cpp.git`
-- Upstream release: `v0.3.3`
-- Upstream commit: `3259b8576b16fb150b51e9ef9090366c5e6efcba`
 - Snapshot date: `2026-08-01`
 - Copied library paths: `include/netft/**` and `src/**`
 - Copied native-test support: `test/support/fake_http_server.*` and
@@ -13,6 +11,10 @@ library.
   `test/support/socket_runtime.hpp`
 - Local destinations: `core/netft/include/netft/**`, `core/netft/src/**`, and
   `core/netft/test/**`
+
+The exact upstream repository, release, commit, and copied paths are recorded
+once in the machine-readable `core/netft/UPSTREAM` manifest. Build and package
+tools consume that manifest directly.
 
 The snapshot excludes the upstream CLI (`app/**`, `test/test_cli.cpp`, and CLI
 test helpers), release and CI workflows (`.github/**`), repository-automation
