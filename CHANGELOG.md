@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-14
+
 ### Fixed
 
 - Derive the Electron and native backend identities from the same core snapshot
@@ -32,5 +34,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Use the netft-cpp v0.3.1 core so fail-stop sessions do not surface stalled or
   backward FT-sequence samples.
 
-[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/netft/netft-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/netft/netft-viewer/releases/tag/v0.1.0

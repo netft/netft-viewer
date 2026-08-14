@@ -3,7 +3,7 @@ authors = ["Net F/T Viewer contributors"]
 channels = ["conda-forge"]
 name = "netft-viewer"
 platforms = ["linux-64", "linux-aarch64", "win-64", "osx-64", "osx-arm64"]
-version = "0.1.0"
+version = "0.1.1"
 
 [dependencies]
 nodejs = "24.*"

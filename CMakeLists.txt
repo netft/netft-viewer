@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(netft_viewer VERSION 0.1.0 LANGUAGES CXX)
+project(netft_viewer VERSION 0.1.1 LANGUAGES CXX)
 file(
   STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/core/netft/UPSTREAM"
   NETFT_VIEWER_CORE_COMMIT_LINES

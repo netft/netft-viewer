@@ -2,7 +2,7 @@
   "name": "netft-viewer",
   "productName": "Net F/T Viewer",
   "desktopName": "netft-viewer.desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Cross-platform desktop viewer for ATI Net F/T sensors.",
