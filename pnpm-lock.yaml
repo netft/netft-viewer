@@ -12,8 +12,8 @@ importers:
   .:
     dependencies:
       '@material-symbols/svg-300':
-        specifier: 0.45.9
-        version: 0.45.9
+        specifier: 0.45.10
+        version: 0.45.10
       echarts:
         specifier: 6.1.0
         version: 6.1.0
@@ -508,8 +508,8 @@ packages:
     resolution: {integrity: sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg==}
     engines: {node: '>= 12.13.0'}
 
-  '@material-symbols/svg-300@0.45.9':
-    resolution: {integrity: sha512-WuMch9fj9XmmhlwZPQA9oXghvDtHxR/aeEdP5aK5A/FBUy4kv6ulUdhJkGQtuMc5ww5PG7lvXW8pFQr0YLvuuA==}
+  '@material-symbols/svg-300@0.45.10':
+    resolution: {integrity: sha512-7BgZyL/GB0kouf6/EX1m4CnL2DusSJNBrIvhdW6pbSlOgpDpPP4M+MSCyp6cTFhSSGbhaWVlRziIzRA60rUQSw==}
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -1021,6 +1021,7 @@ packages:
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
     engines: {node: '>=14.6'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xtuc/ieee754@1.2.0':
     resolution: {integrity: sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA==}
@@ -3899,7 +3900,7 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
 
-  '@material-symbols/svg-300@0.45.9': {}
+  '@material-symbols/svg-300@0.45.10': {}
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
