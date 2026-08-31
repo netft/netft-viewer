@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
       - id: node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
       - id: download-linux
@@ -70,7 +70,7 @@ jobs:
         run: .github/scripts/collect_release_assets.sh release-input release-assets
       - id: sbom
         name: Generate release SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
         with:
           path: release-assets
           format: spdx-json
