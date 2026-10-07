@@ -14,6 +14,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Preserve nanosecond precision in recording spans on macOS ARM64 and compile recording metadata on Windows.
 - Integrate the verified unpublished SDK candidate's calibration and checked-time protections; verify snapshot content before packaging.
 - Reflow controls and six plots at high zoom, support narrower windows and keep title/menu labels distinct.
 - Pin build actions and GoogleTest to reviewed commits.

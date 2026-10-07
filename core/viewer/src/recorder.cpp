@@ -720,13 +720,15 @@ bool Recorder::promote_file() {
   }
   double span{};
   if (capture_metadata_.first_timestamp_ns &&
-      capture_metadata_.last_timestamp_ns) {
-    span = std::max(
-        0.0,
-        static_cast<double>(
-            (static_cast<long double>(*capture_metadata_.last_timestamp_ns) -
-             static_cast<long double>(*capture_metadata_.first_timestamp_ns)) /
-            1.0e9L));
+      capture_metadata_.last_timestamp_ns &&
+      *capture_metadata_.last_timestamp_ns >
+          *capture_metadata_.first_timestamp_ns) {
+    // Subtract integers before conversion: long double is only 64-bit on some
+    // platforms and loses nanoseconds at absolute wall-clock timestamps.
+    const auto elapsed_ns =
+        static_cast<std::uint64_t>(*capture_metadata_.last_timestamp_ns) -
+        static_cast<std::uint64_t>(*capture_metadata_.first_timestamp_ns);
+    span = static_cast<double>(elapsed_ns) / 1.0e9;
   }
   std::ostringstream metadata;
   metadata.imbue(std::locale::classic());
