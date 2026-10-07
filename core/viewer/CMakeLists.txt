@@ -50,7 +50,9 @@ if(BUILD_TESTING)
     ${PROJECT_SOURCE_DIR}/test/core/test_recorder.cpp
   )
   target_include_directories(netft_viewer_recorder PRIVATE ${PROJECT_SOURCE_DIR}/test)
+  FetchContent_MakeAvailable(nlohmann_json)
   target_link_libraries(netft_viewer_recorder PRIVATE
+    nlohmann_json::nlohmann_json
     netft_viewer_core
     ${_netft_viewer_gtest_main}
   )

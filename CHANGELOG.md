@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased recording metadata
+
+- Add a shared versioned recording summary beside completed captures.
+- CLI adds a typed `--schema` interface and sample calibration revisions; Viewer records pause and sequence-gap context.
+
 All notable changes to Net F/T Viewer are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

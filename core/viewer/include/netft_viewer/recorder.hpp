@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -117,6 +119,17 @@ private:
   void discard_queued_samples() noexcept;
   bool drain_complete() const noexcept;
 
+  struct CaptureMetadata {
+    std::optional<std::int64_t> first_timestamp_ns, last_timestamp_ns;
+    std::optional<std::uint32_t> last_rdt;
+    std::uint64_t recorded_rdt_gaps{};
+    std::set<std::uint64_t> configuration_revisions;
+    std::set<netft::ForceUnit> force_units;
+    std::set<netft::TorqueUnit> torque_units;
+  };
+  CaptureMetadata
+      capture_metadata_; // writer-owned after start, never touched by submit
+  std::atomic<std::uint64_t> pause_count_{0};
   RecorderOptions options_;
   std::shared_ptr<RecorderClock> clock_;
   std::shared_ptr<RecorderStorage> storage_;
