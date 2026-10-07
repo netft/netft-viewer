@@ -10,6 +10,15 @@ on:
         description: Validate only Windows packaging after a platform-specific fix
         type: boolean
         default: false
+      artifact_run_id:
+        description: Inspect existing package artifacts from this run; do not rebuild
+        type: string
+        default: ""
+      artifact_platform:
+        description: Native platform for existing-artifact trust inspection
+        type: choice
+        default: win32
+        options: [win32, darwin]
   workflow_call:
 
 permissions:
@@ -21,6 +30,7 @@ concurrency:
 
 jobs:
   package:
+    if: ${{ !inputs.artifact_run_id }}
     name: Package / ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -93,6 +103,36 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14
+
+  artifact-trust:
+    name: Inspect existing artifact trust
+    if: ${{ inputs.artifact_run_id }}
+    runs-on: ${{ inputs.artifact_platform == 'win32' && 'windows-2025' || 'macos-15' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
+          name: ${{ inputs.artifact_platform == 'win32' && 'netft-viewer-windows-x64' || 'netft-viewer-macos-universal' }}
+          path: existing-artifacts
+      - name: Read platform signature and trust results
+        shell: pwsh
+        env:
+          NETFT_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+        run: ./tools/inspect-artifact-trust.ps1 -ArtifactDirectory existing-artifacts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: artifact-trust-${{ inputs.artifact_platform }}-${{ inputs.artifact_run_id }}
+          path: artifact-trust.json
           if-no-files-found: error
           retention-days: 14
 
