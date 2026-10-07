@@ -91,3 +91,9 @@ The SDK snapshot is vendored. curl, GoogleTest (tests only) and nlohmann/json ar
 On a connected machine, configure once with the intended build type and testing option to populate `build/native/_deps`, or provide verified source directories through `FETCHCONTENT_SOURCE_DIR_CURL`, `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`, and `FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON`. Use the exact curl archive SHA and Git commits in `cmake/Dependencies.cmake`; source-directory overrides bypass FetchContent download verification, so verify them before use. A trusted mirror may supply those same bytes.
 
 Reconfigure the populated build with `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` to prohibit dependency download/update. Keep the entire source/build cache at the same location, or use the three source overrides with a fresh build directory. Missing sources fail at configuration with the missing dependency and recovery instruction. Do not treat `FETCHCONTENT_UPDATES_DISCONNECTED=ON` as fully offline: it can still download missing sources. Enabling tests additionally requires the pinned GoogleTest sources. Build with `cmake --build build/native`; for a packaging build apply the same CMake options/source overrides to its configured build directory.
+
+The macOS signed-package job requires successful codesign, Gatekeeper and
+stapler checks on the generated portable application before uploading signed
+installers. A completed inspection with failed trust results blocks the upload.
+This gate still requires a real Developer ID and notarization credentials; its
+source configuration does not establish signed-release acceptance.

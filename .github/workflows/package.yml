@@ -244,6 +244,20 @@ jobs:
         name: Verify signed installer contents
         if: steps.signing-preflight.outputs.enabled == 'true'
         run: node tools/verify-package-artifacts.mjs darwin universal out
+      - id: platform-trust
+        name: Require platform trust before uploading signed installers
+        if: steps.signing-preflight.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          ./tools/inspect-artifact-trust.ps1 -ArtifactDirectory out
+          $trust = Get-Content -Raw artifact-trust.json | ConvertFrom-Json
+          $required = @("codesign", "gatekeeper", "stapler")
+          foreach ($check in $required) {
+            $results = @($trust.results | Where-Object { $_.check -eq $check })
+            if ($results.Count -ne 1 -or $results[0].exit_code -ne 0) {
+              throw "Signed installer failed required platform trust check: $check"
+            }
+          }
       - id: artifact-manifest
         name: Resolve artifact paths
         if: steps.signing-preflight.outputs.enabled == 'true'
