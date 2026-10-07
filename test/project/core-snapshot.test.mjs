@@ -40,3 +40,21 @@ test("rejects missing, duplicate, and malformed snapshot identities", async () =
     );
   }
 });
+
+test("selected snapshot byte tampering is rejected", async () => {
+  const { cp, mkdtemp, appendFile, rm } = await import("node:fs/promises");
+  const { verifyCoreSnapshot } =
+    await import("../../tools/lib/core-snapshot.mjs");
+  const directory = await mkdtemp(join(tmpdir(), "netft-core-bytes-"));
+  try {
+    await cp("core/netft", directory, { recursive: true });
+    await verifyCoreSnapshot(join(directory, "UPSTREAM"));
+    await appendFile(join(directory, "src/types.cpp"), "\n// altered\n");
+    await assert.rejects(
+      verifyCoreSnapshot(join(directory, "UPSTREAM")),
+      /checksum mismatch/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
