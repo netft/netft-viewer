@@ -45,7 +45,7 @@ jobs:
             artifact_name: netft-viewer-macos-universal
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: system-dependencies
@@ -66,7 +66,7 @@ jobs:
         shell: pwsh
         run: npm install --global --ignore-scripts pnpm@11.17.0
       - id: node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
@@ -101,7 +101,7 @@ jobs:
         name: Resolve artifact paths
         run: node tools/write-artifact-manifest.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
       - id: upload
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
@@ -147,7 +147,7 @@ jobs:
           fi
       - id: checkout
         if: steps.signing-preflight.outputs.enabled == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: import-certificate
@@ -193,7 +193,7 @@ jobs:
         run: npm install --global --ignore-scripts pnpm@11.17.0
       - id: node
         if: steps.signing-preflight.outputs.enabled == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
@@ -222,7 +222,7 @@ jobs:
         run: node tools/write-artifact-manifest.mjs darwin universal out
       - id: upload
         if: steps.signing-preflight.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: netft-viewer-macos-universal-signed
           path: ${{ steps.artifact-manifest.outputs.artifact_paths }}

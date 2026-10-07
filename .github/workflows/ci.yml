@@ -20,14 +20,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: pnpm
         name: Bootstrap pnpm
         run: npm install --global --ignore-scripts pnpm@11.17.0
       - id: node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
@@ -94,7 +94,7 @@ jobs:
             architecture: arm64
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: toolchain
@@ -132,7 +132,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: sanitizer-test
@@ -158,7 +158,7 @@ jobs:
       NETFT_VIEWER_E2E_BUILD: "true"
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: system-dependencies
@@ -170,7 +170,7 @@ jobs:
         name: Bootstrap pnpm
         run: npm install --global --ignore-scripts pnpm@11.17.0
       - id: node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
@@ -184,7 +184,7 @@ jobs:
       - id: e2e-failure-artifacts
         name: Upload E2E failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-failure-${{ github.run_id }}
           path: |
