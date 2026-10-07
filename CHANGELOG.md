@@ -1,16 +1,22 @@
 # Changelog
 
-## Unreleased recording metadata
-
-- Add a shared versioned recording summary beside completed captures.
-- CLI adds a typed `--schema` interface and sample calibration revisions; Viewer records pause and sequence-gap context.
-
 All notable changes to Net F/T Viewer are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- Write a shared recording metadata summary with sample counts, units, revisions, pause and written-row sequence gaps.
+- Document fully disconnected builds and diagnose missing pinned dependency sources at configuration.
+
+### Fixed
+
+- Integrate the verified unpublished SDK candidate's calibration and checked-time protections; verify snapshot content before packaging.
+- Reflow controls and six plots at high zoom, support narrower windows and keep title/menu labels distinct.
+- Pin build actions and GoogleTest to reviewed commits.
 
 ## [0.1.1] - 2026-08-14
 
