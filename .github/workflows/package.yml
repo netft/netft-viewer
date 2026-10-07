@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.workflow }}-${{ github.ref }}
+  group: package-${{ github.workflow }}-${{ github.ref }}-${{ inputs.artifact_platform }}-${{ inputs.artifact_run_id }}
   cancel-in-progress: true
 
 jobs:

@@ -71,6 +71,19 @@ The manifest checks the selected bytes, including provenance. It detects drift a
 
 Action and native dependency references are fixed commits; changes must resolve the official upstream tag and review its diff. curl archives retain their SHA-256 check. Before a public production release, verify the `release` environment protection and tag rules in GitHub, macOS signing identity/notarization with `codesign --verify --deep --strict`, `spctl --assess --type execute`, and `xcrun stapler validate`, and Windows Authenticode identity with `Get-AuthenticodeSignature`. Unsigned artifacts may remain explicit development builds; do not describe them as signed production installers. Repository source cannot prove hosted rules, secret configuration or platform trust acceptance. Existing checksum, SBOM, draft-byte comparison and approved publishing gates remain the release path.
 
+For bounded follow-up checks, dispatch `package.yml` with `windows_only=true` to
+build only Windows installers. To inspect existing artifacts without rebuilding,
+set `artifact_run_id` to their Package run and `artifact_platform` to `win32` or
+`darwin`. The native runner records executable/archive hashes and Authenticode or
+codesign/Gatekeeper/stapler results in `artifact-trust.json`. A successful
+inspection job means the report was produced; examine its results and approved
+publisher identity before accepting a signed production build. These read-only
+checks neither sign nor publish artifacts. Artifact retention is 14 days.
+
+The private snapshot is marked `-text` in `.gitattributes` so Windows Git checkout
+cannot rewrite the bytes protected by its manifest. Do not normalize those bytes
+inside the verifier to make a mismatching snapshot pass.
+
 ## Restricted-network and offline native builds
 
 The SDK snapshot is vendored. curl, GoogleTest (tests only) and nlohmann/json are separate pinned FetchContent dependencies; a source checkout is not a complete offline build environment. Pixi/pnpm tools and Electron also require their caches or preinstalled environments.
