@@ -1,5 +1,23 @@
 include(FetchContent)
 
+# CMake 3.21--3.29 does not reliably diagnose missing disconnected sources.
+if(FETCHCONTENT_FULLY_DISCONNECTED)
+  set(_offline_dependencies curl nlohmann_json)
+  if(BUILD_TESTING)
+    list(APPEND _offline_dependencies googletest)
+  endif()
+  foreach(_dependency IN LISTS _offline_dependencies)
+    string(TOUPPER "${_dependency}" _dependency_upper)
+    set(_source "${FETCHCONTENT_BASE_DIR}/${_dependency}-src")
+    if(FETCHCONTENT_SOURCE_DIR_${_dependency_upper})
+      set(_source "${FETCHCONTENT_SOURCE_DIR_${_dependency_upper}}")
+    endif()
+    if(NOT EXISTS "${_source}/CMakeLists.txt")
+      message(FATAL_ERROR "Offline dependency ${_dependency} is missing at ${_source}. Populate the pinned FetchContent cache online or set FETCHCONTENT_SOURCE_DIR_${_dependency_upper} to verified sources; see CONTRIBUTING.md.")
+    endif()
+  endforeach()
+endif()
+
 set(_netft_viewer_build_shared_libs_defined FALSE)
 if(DEFINED BUILD_SHARED_LIBS)
   set(_netft_viewer_build_shared_libs_defined TRUE)

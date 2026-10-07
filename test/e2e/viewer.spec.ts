@@ -250,3 +250,66 @@ test("backend restart and explicit Retry never reconnect the sensor", async ({
   expect((await viewer.fakeCompanion.state()).connected).toBe(false);
   expectRendererHealthy(viewer);
 });
+
+test("controls and six-axis plots remain reachable at desktop zoom levels", async ({
+  viewer,
+}) => {
+  await connect(viewer);
+  await viewer.fakeCompanion.emitSample(20);
+  for (const [width, height, zoom] of [
+    [1440, 900, 1],
+    [1100, 800, 1.25],
+    [1100, 900, 2],
+  ] as const) {
+    await viewer.app.evaluate(
+      ({ BrowserWindow }, size) => {
+        const window = BrowserWindow.getAllWindows()[0]!;
+        window.setSize(size.width, size.height);
+        window.webContents.setZoomFactor(size.zoom);
+      },
+      { width, height, zoom },
+    );
+    await expect
+      .poll(() => viewer.page.evaluate(() => window.devicePixelRatio))
+      .toBe(zoom);
+    expect(await viewer.page.title()).toBe("Net F/T Viewer");
+    await expect
+      .poll(() =>
+        viewer.page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+        ),
+      )
+      .toBe(true);
+    const button = viewer.page.getByTestId("chart-mode-panels");
+    await button.focus();
+    await expect(button).toBeFocused();
+    await button.press("Enter");
+    await expect(
+      viewer.page.locator('[data-testid^="chart-surface-"]'),
+    ).toHaveCount(6);
+    for (const surface of await viewer.page
+      .locator('[data-testid^="chart-surface-"]')
+      .all()) {
+      const box = await surface.boundingBox();
+      expect(box?.width).toBeGreaterThan(80);
+      expect(box?.height).toBeGreaterThan(80);
+      await expect(surface).toHaveAttribute("role", "img");
+      await expect(surface).toHaveAttribute("aria-label", /chart|plot/i);
+    }
+    await viewer.page.getByTestId("chart-window-60").click();
+    await expect(viewer.page.getByTestId("chart-window-60")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const captured = await viewer.app.evaluate(async ({ BrowserWindow }) =>
+      (await BrowserWindow.getAllWindows()[0]!.capturePage())
+        .toPNG()
+        .toString("base64"),
+    );
+    await writeFile(
+      `/tmp/netft-viewer-zoom-${zoom}.png`,
+      Buffer.from(captured, "base64"),
+    );
+  }
+  expectRendererHealthy(viewer);
+});

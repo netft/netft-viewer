@@ -82,3 +82,7 @@ After successful data finalization, the candidate writes `<output>.metadata.json
 Partial or failed captures do not receive a completed summary. Metadata creation and promotion follow the data file's overwrite policy. The two files are finalized separately: a metadata failure reports an error and preserves the completed data file, and may leave a metadata partial for recovery. Keep both files when archiving a successful capture.
 
 The CLI candidate appends `configuration_revision` to CSV without moving existing columns and adds it inside the NDJSON sample object. Viewer already records revisions in each CSV row. Existing published releases retain their documented formats until these changes are released.
+
+## Window and zoom support (candidate)
+
+The candidate accepts windows down to 800 native pixels wide. A narrower CSS viewport caused by 125%–200% zoom reflows the toolbar and six plots; at 700 CSS pixels or below, the sidebar stacks above a scrollable plot workspace. Keyboard-operable plot controls retain visible focus. Charts expose image labels and live values remain available in the measurement table; connection and recording states use text in addition to color. Validated Linux scenes: 1440×900 at 100%, 1100×800 at 125%, and 1100×900 at 200%. Other desktop platforms still require release acceptance.
