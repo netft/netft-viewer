@@ -26,11 +26,11 @@ installation.
 Download the latest installer or portable archive from
 [GitHub Releases](https://github.com/netft/netft-viewer/releases).
 
-| Platform | Architecture | Artifacts |
-| --- | --- | --- |
-| Linux | x86-64, ARM64 | `.deb`, portable `.tar.gz` |
-| Windows | x86-64 | Setup `.exe`, portable `.zip` |
-| macOS | Intel and Apple silicon | Universal `.dmg`, universal `.zip` |
+| Platform | Architecture            | Artifacts                          |
+| -------- | ----------------------- | ---------------------------------- |
+| Linux    | x86-64, ARM64           | `.deb`, portable `.tar.gz`         |
+| Windows  | x86-64                  | Setup `.exe`, portable `.zip`      |
+| macOS    | Intel and Apple silicon | Universal `.dmg`, universal `.zip` |
 
 ## Quick start
 
@@ -63,21 +63,21 @@ guidance. Report security issues through [SECURITY.md](SECURITY.md).
 Net F/T Viewer is licensed under the [Apache License 2.0](LICENSE). Required
 third-party license and notice texts are distributed in [LICENSES](LICENSES).
 
-## Recording metadata (unreleased candidate)
+## Recording metadata (0.2.0)
 
 After successful data finalization, the candidate writes `<output>.metadata.json` using schema version 1 and kind `netft-recording`. CLI and Viewer share these meanings:
 
-| Field | Meaning |
-| --- | --- |
-| `producer`, `result` | `netft-cli` or `netft-viewer`; `complete` or CLI `interrupted` after a successful nonempty drain. |
-| `accepted_samples`, `written_samples` | Samples accepted into the recording queue and rows successfully written. These are not power-loss durability guarantees. |
-| `sample_span_seconds` | Nonnegative host receive-time span between first and last written sample; zero for fewer than two samples. |
-| `configuration_revisions` | Unique revision identifiers in written rows, scoped to the producer session. They do not contain full calibration snapshots. |
-| `force_units`, `torque_units` | Unique native unit symbols observed in written rows. |
-| `recorded_rdt_gaps` | Sum of forward sequence gaps between written rows, using unsigned wraparound and ignoring backward jumps. Pauses, rate filtering and reconnects can contribute; this is not the SDK packet-loss counter. |
-| `pause_count` | Accepted Viewer pauses; CLI has no pause operation and reports zero. |
-| `reconnect_count` | CLI SDK reconnect counter for the run; `null` for Viewer because its recorder does not own connection health. |
-| `error` | `null` on successful finalization. Failure details remain in the CLI error or Viewer recorder state. |
+| Field                                 | Meaning                                                                                                                                                                                                  |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `producer`, `result`                  | `netft-cli` or `netft-viewer`; `complete` or CLI `interrupted` after a successful nonempty drain.                                                                                                        |
+| `accepted_samples`, `written_samples` | Samples accepted into the recording queue and rows successfully written. These are not power-loss durability guarantees.                                                                                 |
+| `sample_span_seconds`                 | Nonnegative host receive-time span between first and last written sample; zero for fewer than two samples.                                                                                               |
+| `configuration_revisions`             | Unique revision identifiers in written rows, scoped to the producer session. They do not contain full calibration snapshots.                                                                             |
+| `force_units`, `torque_units`         | Unique native unit symbols observed in written rows.                                                                                                                                                     |
+| `recorded_rdt_gaps`                   | Sum of forward sequence gaps between written rows, using unsigned wraparound and ignoring backward jumps. Pauses, rate filtering and reconnects can contribute; this is not the SDK packet-loss counter. |
+| `pause_count`                         | Accepted Viewer pauses; CLI has no pause operation and reports zero.                                                                                                                                     |
+| `reconnect_count`                     | CLI SDK reconnect counter for the run; `null` for Viewer because its recorder does not own connection health.                                                                                            |
+| `error`                               | `null` on successful finalization. Failure details remain in the CLI error or Viewer recorder state.                                                                                                     |
 
 Partial or failed captures do not receive a completed summary. Metadata creation and promotion follow the data file's overwrite policy. The two files are finalized separately: a metadata failure reports an error and preserves the completed data file, and may leave a metadata partial for recovery. Keep both files when archiving a successful capture.
 

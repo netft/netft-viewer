@@ -97,7 +97,17 @@ const config = {
             entitlements,
           },
         }
-      : {}),
+      : {
+          osxSign: {
+            identity: "-",
+            identityValidation: false,
+            hardenedRuntime: false,
+            preAutoEntitlements: false,
+            preEmbedProvisioningProfile: false,
+            gatekeeperAssess: false,
+            entitlements,
+          },
+        }),
     ...(notarizationEnabled ? { osxNotarize: macNotarization() } : {}),
     ...(e2eBuild
       ? {

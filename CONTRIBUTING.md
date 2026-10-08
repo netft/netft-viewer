@@ -58,16 +58,22 @@ By contributing, you agree that your contribution is licensed under the [Apache 
 
 ### Current core candidate
 
-The private snapshot uses unpublished upstream commit `91f012c5d6f9b63902765ccbec3437cb286c15e1`; `UPSTREAM` marks it `unreleased`. It is not the published v0.3.3 snapshot. Update from a clean upstream checkout using:
+The private snapshot uses the exact netft-cpp `v0.3.4` release commit `1ce68a08a9387d9a36d22c3c259e44533199c347`; `UPSTREAM` and its content manifest record that release identity. Update from a clean upstream checkout using:
 
 ```sh
-python tools/sync_core.py sync --source /path/to/netft-cpp --commit 91f012c5d6f9b63902765ccbec3437cb286c15e1
+python tools/sync_core.py sync --source /path/to/netft-cpp --commit 1ce68a08a9387d9a36d22c3c259e44533199c347
 python tools/sync_core.py verify
 ```
 
 The manifest checks the selected bytes, including provenance. It detects drift and does not authenticate a remote release. Consumer build files remain private; fixes to core source belong upstream.
 
 ### Production release acceptance
+
+Without a publisher identity, macOS bundles receive ad hoc development signatures
+to seal the final packaged bytes and allow native backend startup checks. This
+does not identify a publisher, pass Gatekeeper distribution acceptance, or replace
+notarization. The unsigned development release channel is marked as a GitHub
+prerelease; production identity and notarization checks remain separate.
 
 Action and native dependency references are fixed commits; changes must resolve the official upstream tag and review its diff. curl archives retain their SHA-256 check. Before a public production release, verify the `release` environment protection and tag rules in GitHub, macOS signing identity/notarization with `codesign --verify --deep --strict`, `spctl --assess --type execute`, and `xcrun stapler validate`, and Windows Authenticode identity with `Get-AuthenticodeSignature`. Unsigned artifacts may remain explicit development builds; do not describe them as signed production installers. Repository source cannot prove hosted rules, secret configuration or platform trust acceptance. Existing checksum, SBOM, draft-byte comparison and approved publishing gates remain the release path.
 

@@ -95,6 +95,15 @@ jobs:
           test -n "$deb"
           sudo apt-get install --yes "$(realpath "$deb")"
           xvfb-run --auto-servernum node test/e2e/production-backend-smoke.mjs /usr/bin/netft-viewer
+      - id: development-macos-smoke
+        name: Verify development code integrity and start real macOS backend
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          app="$(find out -maxdepth 2 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict "$app"
+          node test/e2e/production-backend-smoke.mjs "$(realpath "$app/Contents/MacOS/netft-viewer")"
       - id: artifact-manifest
         name: Resolve artifact paths
         run: node tools/write-artifact-manifest.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out

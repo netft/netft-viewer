@@ -132,6 +132,14 @@ jobs:
             release-bundle/release-assets \
             release-bundle/release-notes.md
 
+      - name: Mark development packages as a prerelease
+        if: vars.MACOS_SIGNING_ENABLED != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${GITHUB_REPOSITORY}" --prerelease --latest=false
+
   publish:
     name: Publish approved release
     needs: draft
