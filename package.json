@@ -44,7 +44,7 @@
     "react-dom": "19.3.0",
     "scheduler": "0.28.0",
     "tslib": "2.3.0",
-    "zod": "4.4.3",
+    "zod": "4.6.5",
     "zrender": "6.1.0"
   },
   "devDependencies": {
