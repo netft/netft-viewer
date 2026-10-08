@@ -7,7 +7,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-08
+## [0.2.1] - 2026-10-08
 
 ### Distribution
 
@@ -20,11 +20,17 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Allow the release caller to read Actions artifacts required by its reusable package workflow.
+
 - Replace invalid inherited macOS bundle signatures with development ad hoc signatures, and verify code integrity and real backend startup before uploading development packages.
 - Preserve nanosecond precision in recording spans on macOS ARM64 and compile recording metadata on Windows.
 - Integrate netft-cpp 0.3.4's calibration and checked-time protections; verify snapshot content before packaging.
 - Reflow controls and six plots at high zoom, support narrower windows and keep title/menu labels distinct.
 - Pin build actions and GoogleTest to reviewed commits.
+
+## [0.2.0] - 2026-10-08
+
+- Unpublished tag: the release workflow could not start because its reusable workflow lacked Actions read permission. Changes ship in 0.2.1.
 
 ## [0.1.1] - 2026-08-14
 
@@ -53,7 +59,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Use the netft-cpp v0.3.1 core so fail-stop sessions do not surface stalled or
   backward FT-sequence samples.
 
-[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.1...HEAD
 [0.2.0]: https://github.com/netft/netft-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/netft/netft-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/netft/netft-viewer/releases/tag/v0.1.0
+
+[0.2.1]: https://github.com/netft/netft-viewer/compare/v0.2.0...v0.2.1
