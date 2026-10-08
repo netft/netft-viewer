@@ -6,8 +6,8 @@ platforms = ["linux-64", "linux-aarch64", "win-64", "osx-64", "osx-arm64"]
 version = "0.2.1"
 
 [dependencies]
-nodejs = "24.*"
-pnpm = "==11.17.0"
+nodejs = ">=24.15,<25"
+pnpm = "==11.21.0"
 python = "3.12.*"
 pytest = ">=8,<10"
 cmake = ">=3.21"

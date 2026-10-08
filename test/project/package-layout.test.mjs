@@ -177,9 +177,9 @@ test("ASAR entry paths use portable separators", async () => {
   assert.deepEqual(
     normalizeArchivePaths([
       "\\.vite\\renderer\\main_window\\index.html",
-      "/.vite/build/main.js",
+      "/.vite/build/main.cjs",
     ]),
-    ["/.vite/renderer/main_window/index.html", "/.vite/build/main.js"],
+    ["/.vite/renderer/main_window/index.html", "/.vite/build/main.cjs"],
   );
 });
 

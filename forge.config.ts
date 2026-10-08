@@ -58,32 +58,19 @@ const config = {
     executableName: "netft-viewer",
     icon,
     afterComplete: [
-      (
-        buildPath: string,
-        _electronVersion: string,
-        platform: string,
-        architecture: string,
-        callback: (error?: Error | null) => void,
-      ) => {
-        if (
-          !shouldRemoveMacCodeSignatures(
-            platform,
-            forgeArchitecture,
-            architecture,
-          )
-        ) {
-          callback();
+      async ({
+        buildPath,
+        platform,
+        arch,
+      }: {
+        buildPath: string;
+        platform: string;
+        arch: string;
+      }) => {
+        if (!shouldRemoveMacCodeSignatures(platform, forgeArchitecture, arch)) {
           return;
         }
-        removeMacCodeSignatures(buildPath, platform).then(
-          () => callback(),
-          (error: unknown) =>
-            callback(
-              error instanceof Error
-                ? error
-                : new Error("failed to remove macOS code signatures"),
-            ),
-        );
+        await removeMacCodeSignatures(buildPath, platform);
       },
     ],
     osxUniversal: {

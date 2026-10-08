@@ -7,6 +7,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Maintenance
+
+- Update Electron, Forge, React and the development toolchain together; adapt main and preload bundles to Forge 8 CommonJS filenames.
+- Keep Node.js 24 runtime types and synchronize the pinned pnpm version across developer environments and CI.
+- Wait for packaged backend startup within a fixed deadline instead of assuming it completes in five seconds.
+
 ### Distribution
 
 - Publish verified releases as stable releases regardless of publisher signing configuration. Keep package integrity checks, draft byte verification and protected publication approval.

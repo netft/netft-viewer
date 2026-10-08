@@ -29,6 +29,9 @@ updates:
           - "@vitest/*"
           - jsdom
           - vitest
+        update-types:
+          - minor
+          - patch
       development-tooling:
         dependency-type: development
         patterns:
@@ -38,6 +41,9 @@ updates:
           - typescript
           - vite
           - yaml
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
