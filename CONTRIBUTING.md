@@ -67,15 +67,19 @@ python tools/sync_core.py verify
 
 The manifest checks the selected bytes, including provenance. It detects drift and does not authenticate a remote release. Consumer build files remain private; fixes to core source belong upstream.
 
-### Production release acceptance
+### Stable release acceptance
 
-Without a publisher identity, macOS bundles receive ad hoc development signatures
+Verified `vX.Y.Z` releases are published as stable releases. Publisher signing and
+Apple notarization are optional and do not determine the release channel.
+
+Without a publisher identity, macOS bundles receive ad hoc signatures
 to seal the final packaged bytes and allow native backend startup checks. This
 does not identify a publisher, pass Gatekeeper distribution acceptance, or replace
-notarization. The unsigned development release channel is marked as a GitHub
-prerelease; production identity and notarization checks remain separate.
+notarization. Windows packages remain unsigned. Disclose this distribution state
+in release notes and installation instructions; operating-system policy may
+require users to approve an application before opening it.
 
-Action and native dependency references are fixed commits; changes must resolve the official upstream tag and review its diff. curl archives retain their SHA-256 check. Before a public production release, verify the `release` environment protection and tag rules in GitHub, macOS signing identity/notarization with `codesign --verify --deep --strict`, `spctl --assess --type execute`, and `xcrun stapler validate`, and Windows Authenticode identity with `Get-AuthenticodeSignature`. Unsigned artifacts may remain explicit development builds; do not describe them as signed production installers. Repository source cannot prove hosted rules, secret configuration or platform trust acceptance. Existing checksum, SBOM, draft-byte comparison and approved publishing gates remain the release path.
+Action and native dependency references are fixed commits; changes must resolve the official upstream tag and review its diff. curl archives retain their SHA-256 check. Before publication, verify the `release` environment protection and tag rules in GitHub and complete the existing checksum, SBOM, draft-byte comparison and package startup checks. If publisher signing is enabled, also verify the expected publisher identity, macOS notarization with `codesign --verify --deep --strict`, `spctl --assess --type execute` and `xcrun stapler validate`, and Windows Authenticode identity with `Get-AuthenticodeSignature` where applicable. Describe packages as signed only after the applicable identity and trust checks pass. Repository source cannot prove hosted rules, secret configuration or platform trust acceptance. Protected approval remains required for publication.
 
 For bounded follow-up checks, dispatch `package.yml` with `windows_only=true` to
 build only Windows installers. To inspect existing artifacts without rebuilding,
