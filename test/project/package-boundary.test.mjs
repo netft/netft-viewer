@@ -41,9 +41,9 @@ test(
     );
     const packagedMain = extractFile(
       archive,
-      join(".vite", "build", "main.js"),
+      join(".vite", "build", "main.cjs"),
     ).toString("utf8");
-    const builtMain = await readFile(resolve(".vite/build/main.js"), "utf8");
+    const builtMain = await readFile(resolve(".vite/build/main.cjs"), "utf8");
     for (const forbidden of [
       "fake-companion.mjs",
       "NETFT_VIEWER_E2E_APP_VERSION",

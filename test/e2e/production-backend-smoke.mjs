@@ -81,24 +81,31 @@ application.stderr.on("data", (chunk) => {
 
 let failure;
 try {
-  await Promise.race([
-    delay(5_000),
-    new Promise((_, rejectPromise) => {
-      application.once("error", rejectPromise);
-      application.once("exit", (code, signal) =>
-        rejectPromise(
-          new Error(
-            `packaged application exited before backend verification: ${String(code ?? signal)}`,
-          ),
-        ),
-      );
-    }),
-  ]);
-  const running = [];
-  for (const pid of await descendants(application.pid)) {
-    if ((await executableName(pid)) === "netft-viewer-companion") {
-      running.push(pid);
+  let startupFailure;
+  application.once("error", (error) => {
+    startupFailure = error;
+  });
+  application.once("exit", (code, signal) => {
+    startupFailure = new Error(
+      `packaged application exited before backend verification: ${String(code ?? signal)}`,
+    );
+  });
+  const deadline = performance.now() + 20_000;
+  let running = [];
+  while (performance.now() < deadline) {
+    if (startupFailure !== undefined) {
+      throw startupFailure;
     }
+    running = [];
+    for (const pid of await descendants(application.pid)) {
+      if ((await executableName(pid)) === "netft-viewer-companion") {
+        running.push(pid);
+      }
+    }
+    if (running.length !== 0) {
+      break;
+    }
+    await delay(250);
   }
   assert.equal(
     running.length,

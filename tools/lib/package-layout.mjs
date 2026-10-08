@@ -237,7 +237,7 @@ export const verifyPackageLayout = async ({
   }
   const mainBundle = extractFile(
     archive,
-    join(".vite", "build", "main.js"),
+    join(".vite", "build", "main.cjs"),
   ).toString("utf8");
   for (const forbidden of [
     "NETFT_VIEWER_E2E_APP_VERSION",

@@ -10,7 +10,7 @@ Security vulnerabilities must follow [SECURITY.md](SECURITY.md) instead of the p
 
 ## Development environment
 
-The reproducible development environment uses [Pixi](https://pixi.sh/) and includes Node.js 24, pnpm 11.17.0, CMake, Ninja, Clang, Python, and the native test tools:
+The reproducible development environment uses [Pixi](https://pixi.sh/) and includes Node.js 24.15 or newer within the 24.x series, pnpm 11.21.0, CMake, Ninja, Clang, Python, and the native test tools:
 
 ```bash
 pixi install

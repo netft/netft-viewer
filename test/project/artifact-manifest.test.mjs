@@ -32,6 +32,18 @@ test("artifact manifest derives native package paths from version and target", a
     /artifact_paths<<NETFT_VIEWER_ARTIFACT_PATHS[\s\S]*9\.8\.7/,
   );
 
+  const macPaths = await writeArtifactManifest({
+    platform: "darwin",
+    architecture: "universal",
+    outDirectory: "out",
+    packageJson,
+    githubOutput: output,
+  });
+  assert.deepEqual(macPaths, [
+    "out/make/dmg/universal/Net F-T Viewer.dmg",
+    "out/make/zip/darwin/universal/Net F-T Viewer-darwin-universal-9.8.7.zip",
+  ]);
+
   await writeFile(packageJson, JSON.stringify({ version: "9.8.8" }));
   const changed = await writeArtifactManifest({
     platform: "win32",

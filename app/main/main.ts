@@ -688,7 +688,7 @@ const boot = async (): Promise<void> => {
       });
     },
     iconPath: join(app.getAppPath(), "packaging", "icons", "netft-viewer.png"),
-    preloadPath: join(__dirname, "preload.js"),
+    preloadPath: join(__dirname, "preload.cjs"),
     rendererUrl,
   });
   const logs = new LogStore(app.getPath("logs"));
