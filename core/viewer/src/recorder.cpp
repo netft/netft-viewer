@@ -310,6 +310,8 @@ RecorderResult Recorder::start(const std::filesystem::path &target,
   accepted_samples_.store(0, std::memory_order_relaxed);
   written_samples_.store(0, std::memory_order_relaxed);
   bytes_written_.store(0, std::memory_order_relaxed);
+  capture_metadata_ = {};
+  pause_count_.store(0, std::memory_order_relaxed);
   failure_code_.store(FailureCode::None, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> wait_lock(wait_mutex_);
@@ -434,6 +436,7 @@ RecorderResult Recorder::pause() {
       return RecorderResult::InvalidState;
     }
   }
+  pause_count_.fetch_add(1, std::memory_order_relaxed);
   writer_condition_.notify_one();
   control_condition_.wait(wait_lock, [&] {
     return state_.load(std::memory_order_acquire) == RecordingState::Paused ||
@@ -636,6 +639,21 @@ bool Recorder::write_available_batch() {
   stream << std::setprecision(std::numeric_limits<double>::max_digits10);
   for (std::size_t index = 0; index < count; ++index) {
     append_csv_row(stream, batch[index]);
+    const auto &sample = batch[index];
+    if (!capture_metadata_.first_timestamp_ns)
+      capture_metadata_.first_timestamp_ns = sample.host_receive_timestamp_ns;
+    capture_metadata_.last_timestamp_ns = sample.host_receive_timestamp_ns;
+    capture_metadata_.configuration_revisions.insert(
+        sample.configuration_revision);
+    capture_metadata_.force_units.insert(sample.force_unit);
+    capture_metadata_.torque_units.insert(sample.torque_unit);
+    if (capture_metadata_.last_rdt) {
+      const auto delta = static_cast<std::uint32_t>(
+          sample.rdt_sequence - *capture_metadata_.last_rdt);
+      if (delta > 0 && delta < 0x80000000U)
+        capture_metadata_.recorded_rdt_gaps += delta - 1U;
+    }
+    capture_metadata_.last_rdt = sample.rdt_sequence;
   }
   const auto text = stream.str();
   std::string error;
@@ -686,6 +704,76 @@ bool Recorder::promote_file() {
   if (!storage_->promote(partial, final, overwrite, error)) {
     enter_error(error.empty() ? std::string_view{"CSV promotion failed"}
                               : std::string_view{error});
+    return false;
+  }
+
+  // Metadata is a separate exclusive file. A failure keeps the valid CSV and
+  // reports Error; the pair is not advertised as a single atomic transaction.
+  const auto metadata_final =
+      std::filesystem::path(final.string() + ".metadata.json");
+  const auto metadata_partial =
+      std::filesystem::path(metadata_final.string() + ".partial");
+  auto metadata_file = storage_->create_exclusive(metadata_partial, error);
+  if (!metadata_file) {
+    enter_error(error);
+    return false;
+  }
+  double span{};
+  if (capture_metadata_.first_timestamp_ns &&
+      capture_metadata_.last_timestamp_ns &&
+      *capture_metadata_.last_timestamp_ns >
+          *capture_metadata_.first_timestamp_ns) {
+    // Subtract integers before conversion: long double is only 64-bit on some
+    // platforms and loses nanoseconds at absolute wall-clock timestamps.
+    const auto elapsed_ns =
+        static_cast<std::uint64_t>(*capture_metadata_.last_timestamp_ns) -
+        static_cast<std::uint64_t>(*capture_metadata_.first_timestamp_ns);
+    span = static_cast<double>(elapsed_ns) / 1.0e9;
+  }
+  std::ostringstream metadata;
+  metadata.imbue(std::locale::classic());
+  metadata << std::setprecision(std::numeric_limits<double>::max_digits10)
+           << "{\"schema_version\":1,\"kind\":\"netft-recording\",\"producer\":"
+              "\"netft-viewer\",\"result\":\"complete\","
+           << "\"accepted_samples\":"
+           << accepted_samples_.load(std::memory_order_relaxed)
+           << ",\"written_samples\":"
+           << written_samples_.load(std::memory_order_relaxed)
+           << ",\"sample_span_seconds\":" << span
+           << ",\"recorded_rdt_gaps\":" << capture_metadata_.recorded_rdt_gaps
+           << ",\"pause_count\":"
+           << pause_count_.load(std::memory_order_relaxed);
+  metadata << ",\"reconnect_count\":null,\"error\":null,\"configuration_"
+              "revisions\":[";
+  bool first = true;
+  for (const auto revision : capture_metadata_.configuration_revisions) {
+    if (!first)
+      metadata << ',';
+    first = false;
+    metadata << revision;
+  }
+  metadata << "],\"force_units\":[";
+  first = true;
+  for (const auto unit : capture_metadata_.force_units) {
+    if (!first)
+      metadata << ',';
+    first = false;
+    metadata << '"' << netft::to_string(unit) << '"';
+  }
+  metadata << "],\"torque_units\":[";
+  first = true;
+  for (const auto unit : capture_metadata_.torque_units) {
+    if (!first)
+      metadata << ',';
+    first = false;
+    metadata << '"' << netft::to_string(unit) << '"';
+  }
+  metadata << "]}\n";
+  if (!metadata_file->write(metadata.str(), error) ||
+      !metadata_file->flush(error) || !metadata_file->close(error) ||
+      !storage_->promote(metadata_partial, metadata_final, overwrite, error)) {
+    enter_error(error.empty() ? "recording metadata could not be finalized"
+                              : error);
     return false;
   }
   return true;

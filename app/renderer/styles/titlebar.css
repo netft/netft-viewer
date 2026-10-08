@@ -271,3 +271,10 @@
 :fullscreen .viewer-shell {
   height: 100vh;
 }
+
+/* Leave menu labels and native controls distinct at high zoom. */
+@media (max-width: 1000px) {
+  .titlebar-center {
+    display: none;
+  }
+}

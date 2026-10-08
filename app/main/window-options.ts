@@ -30,7 +30,7 @@ export const buildViewerWindowOptions = (
   return {
     width: 1_440,
     height: 900,
-    minWidth: 1_100,
+    minWidth: 800,
     minHeight: 640,
     show: false,
     ...(iconPath === undefined ? {} : { icon: iconPath }),

@@ -48,7 +48,7 @@ body,
 }
 
 body {
-  min-width: 1100px;
+  min-width: 0;
   overflow: hidden;
   background: var(--canvas);
 }

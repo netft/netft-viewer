@@ -44,7 +44,7 @@ describe("viewer window options", () => {
     expect(options).toMatchObject({
       width: 1_440,
       height: 900,
-      minWidth: 1_100,
+      minWidth: 800,
       minHeight: 640,
       show: false,
       icon: iconPath,

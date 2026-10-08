@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { readFile, readlink, rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 
-if (process.platform !== "linux") {
-  throw new Error("the installed application smoke test requires Linux");
+if (!["linux", "darwin"].includes(process.platform)) {
+  throw new Error(
+    "the packaged application smoke test requires Linux or macOS",
+  );
 }
+
+const run = promisify(execFile);
 
 const executable = process.argv[2];
 if (executable === undefined || !isAbsolute(executable)) {
@@ -20,6 +25,10 @@ const delay = (milliseconds) =>
 
 const childPids = async (pid) => {
   try {
+    if (process.platform === "darwin") {
+      const { stdout } = await run("pgrep", ["-P", String(pid)]);
+      return stdout.trim().split(/\s+/).filter(Boolean).map(Number);
+    }
     const value = await readFile(`/proc/${pid}/task/${pid}/children`, "utf8");
     return value.trim().split(/\s+/).filter(Boolean).map(Number);
   } catch {
@@ -42,6 +51,10 @@ const descendants = async (rootPid) => {
 
 const executableName = async (pid) => {
   try {
+    if (process.platform === "darwin") {
+      const { stdout } = await run("ps", ["-p", String(pid), "-o", "comm="]);
+      return basename(stdout.trim());
+    }
     return basename(await readlink(`/proc/${pid}/exe`));
   } catch {
     return undefined;

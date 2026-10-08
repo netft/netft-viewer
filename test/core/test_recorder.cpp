@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -130,6 +131,18 @@ TEST(RecorderTest, PauseDrainsAndResumeLeavesSequenceAndTimestampGap) {
   const auto snapshot = recorder.snapshot();
   EXPECT_EQ(snapshot.accepted_samples, 2U);
   EXPECT_EQ(snapshot.written_samples, 2U);
+  std::ifstream metadata_stream(target.string() + ".metadata.json");
+  const auto metadata = nlohmann::json::parse(metadata_stream);
+  EXPECT_EQ(metadata.at("schema_version"), 1);
+  EXPECT_EQ(metadata.at("accepted_samples"), 2);
+  EXPECT_EQ(metadata.at("written_samples"), 2);
+  EXPECT_EQ(metadata.at("pause_count"), 1);
+  EXPECT_EQ(metadata.at("recorded_rdt_gaps"), 1);
+  EXPECT_DOUBLE_EQ(metadata.at("sample_span_seconds").get<double>(), 0.002);
+  EXPECT_EQ(metadata.at("configuration_revisions"), nlohmann::json::array({3}));
+  EXPECT_EQ(metadata.at("force_units"), nlohmann::json::array({"N"}));
+  EXPECT_EQ(metadata.at("torque_units"), nlohmann::json::array({"N-mm"}));
+  EXPECT_TRUE(metadata.at("reconnect_count").is_null());
 }
 
 TEST(RecorderTest, RefusesAnExistingRecoveryPartialWithoutChangingIt) {

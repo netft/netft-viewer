@@ -1,0 +1,2 @@
+# Snapshot manifests authenticate committed bytes, including line endings.
+/core/netft/** -text

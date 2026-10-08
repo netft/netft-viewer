@@ -559,6 +559,11 @@ class CompanionProcessTest(unittest.TestCase):
             self.assertTrue(target.is_file())
             self.assertFalse(Path(f"{target}.partial").exists())
             self.assertGreater(len(target.read_text().splitlines()), 1)
+            metadata = json.loads(Path(f"{target}.metadata.json").read_text())
+            self.assertEqual(metadata["kind"], "netft-recording")
+            self.assertEqual(metadata["written_samples"], len(target.read_text().splitlines()) - 1)
+            self.assertEqual(metadata["accepted_samples"], metadata["written_samples"])
+            self.assertEqual(metadata["configuration_revisions"], [1])
             companion.close()
 
     def test_shutdown_reports_finalization_failure_after_recovery_events(self) -> None:

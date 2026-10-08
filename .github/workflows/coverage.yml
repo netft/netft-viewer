@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: toolchain
@@ -51,7 +51,7 @@ jobs:
             build/coverage
           test -s coverage/native/coverage.xml
       - id: upload
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           files: coverage/native/coverage.xml
           flags: native
@@ -65,14 +65,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - id: pnpm
         name: Bootstrap pnpm
         run: npm install --global --ignore-scripts pnpm@11.17.0
       - id: node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
@@ -86,7 +86,7 @@ jobs:
           pnpm test:coverage:frontend
           test -s coverage/frontend/lcov.info
       - id: upload
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           files: coverage/frontend/lcov.info
           flags: frontend

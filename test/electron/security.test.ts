@@ -135,7 +135,6 @@ describe("Electron window security", () => {
     expect(FakeBrowserWindow.lastOptions?.icon).toBe(
       resolve("packaging/icons/netft-viewer.png"),
     );
-    expect(FakeBrowserWindow.lastOptions?.minWidth).toBe(1_100);
   });
 
   it("denies external navigation and every renderer-created window", async () => {
