@@ -88,7 +88,7 @@ export const expectedArtifacts = ({
   return [
     {
       kind: "dmg",
-      path: join(output, "make", "Net F-T Viewer.dmg"),
+      path: join(output, "make", "dmg", architecture, "Net F-T Viewer.dmg"),
     },
     {
       kind: "zip",
