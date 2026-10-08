@@ -360,7 +360,8 @@ for name in "${verified_names[@]}"; do
 done
 
 if [[ "$mode" == "publish" && "$is_draft" == true ]]; then
-  gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+  gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+    --draft=false --prerelease=false --latest
 fi
 
 if [[ "$mode" == "publish" ]]; then
@@ -381,13 +382,16 @@ if [[ "$mode" == "publish" ]]; then
         process.stdin.on("data", (chunk) => (input += chunk));
         process.stdin.on("end", () => {
           const value = JSON.parse(input);
-          if (typeof value.draft !== "boolean") process.exit(2);
-          process.stdout.write(value.draft ? "false" : "true");
+          if (
+            typeof value.draft !== "boolean" ||
+            typeof value.prerelease !== "boolean"
+          ) process.exit(2);
+          process.stdout.write(value.draft || value.prerelease ? "false" : "true");
         });
       '
   )"
   if [[ "$published" != true ]]; then
-    echo "release remained a draft after publication" >&2
+    echo "release is not a published stable release" >&2
     exit 65
   fi
   mapfile -t published_names < <(read_remote_assets "$release_json")

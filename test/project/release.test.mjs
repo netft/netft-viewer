@@ -48,6 +48,7 @@ const releaseBody = () => ({
   assets: Object.keys(state.assets).sort().map((name) => ({ name })),
   body: state.body,
   draft: state.draft,
+  prerelease: state.prerelease,
   name: state.title,
   tag_name: state.tag,
 });
@@ -78,6 +79,7 @@ if (args[1] === "create") {
   if (state.exists || !args.includes("--draft")) process.exit(2);
   state.exists = true;
   state.draft = true;
+  state.prerelease = false;
   state.tag = args[2];
   state.title = valueAfter("--title");
   state.body = fs.readFileSync(valueAfter("--notes-file"), "utf8");
@@ -101,6 +103,9 @@ if (args[1] === "create") {
 } else if (args[1] === "edit") {
   if (!state.exists || !state.draft || !args.includes("--draft=false")) process.exit(7);
   if (!state.postPublishStuck) state.draft = false;
+  if (args.includes("--prerelease=false") && !state.postPublishPrereleaseStuck) {
+    state.prerelease = false;
+  }
   state.mutations.publish += 1;
   save(state);
 } else {
@@ -130,6 +135,7 @@ const fixture = async () => {
       mutations: { create: 0, publish: 0, upload: 0 },
       postCreateNotFound: 0,
       postPublishStuck: false,
+      prerelease: false,
       tag: "",
       title: "",
     }),
@@ -299,6 +305,29 @@ test("published releases remain byte-identical and immutable", async () => {
     JSON.parse(await readFile(files.state, "utf8")).mutations,
     published.mutations,
   );
+});
+
+test("publisher requires stable publication even when a draft was marked prerelease", async () => {
+  for (const stuck of [false, true]) {
+    const files = await fixture();
+    assert.equal(runPublisher(files, "stage").status, 0);
+    const state = JSON.parse(await readFile(files.state, "utf8"));
+    state.prerelease = true;
+    state.postPublishPrereleaseStuck = stuck;
+    await writeFile(files.state, JSON.stringify(state));
+
+    const result = runPublisher(files, "publish");
+    const published = JSON.parse(await readFile(files.state, "utf8"));
+    assert.equal(published.draft, false);
+    if (stuck) {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /not a published stable release/);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(published.prerelease, false);
+    }
+    await rm(files.directory, { recursive: true, force: true });
+  }
 });
 
 test("publisher rejects untrusted tags and missing credentials before gh access", async () => {
