@@ -12,8 +12,8 @@ importers:
   .:
     dependencies:
       '@material-symbols/svg-300':
-        specifier: 0.47.6
-        version: 0.47.6
+        specifier: 0.48.0
+        version: 0.48.0
       echarts:
         specifier: 6.1.0
         version: 6.1.0
@@ -435,8 +435,8 @@ packages:
     resolution: {integrity: sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg==}
     engines: {node: '>= 12.13.0'}
 
-  '@material-symbols/svg-300@0.47.6':
-    resolution: {integrity: sha512-19gzRxeQzUwbR8WAPfAz/wb1r0Gu4Xt65BYgHzL44NfvUEZ157YxqaGIoRm4IkMZfy5Eem+hnCyiI+EX7+TG7w==}
+  '@material-symbols/svg-300@0.48.0':
+    resolution: {integrity: sha512-Vx0mUm15LgbAuA3Qc3QGuMY6YHnRaj0J4ftUu252/zaVxu3a6CWq8kEr61ZxWiQ0GkEzjN4vPOThKwC9Ksb4FA==}
 
   '@oxc-project/types@0.152.0':
     resolution: {integrity: sha512-oM/5rLBm2tPkg0iBgkH/FOeR3PCDpY19GTgAZjMFM8h9WI9VW7cLgzp6nwtarYKmovavIQZ+Fe/RKX/8C8O/Rw==}
@@ -2750,7 +2750,7 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
 
-  '@material-symbols/svg-300@0.47.6': {}
+  '@material-symbols/svg-300@0.48.0': {}
 
   '@oxc-project/types@0.152.0': {}
 
