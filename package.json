@@ -38,13 +38,13 @@
     "test:package-boundary": "pnpm run package && NETFT_VIEWER_VERIFY_PRODUCTION_PACKAGE=true node --test test/project/package-boundary.test.mjs"
   },
   "dependencies": {
-    "@material-symbols/svg-300": "0.45.10",
+    "@material-symbols/svg-300": "0.47.6",
     "echarts": "6.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "scheduler": "0.28.0",
     "tslib": "2.3.0",
-    "zod": "4.4.3",
+    "zod": "4.6.5",
     "zrender": "6.1.0"
   },
   "devDependencies": {
@@ -57,7 +57,7 @@
     "@electron-forge/plugin-vite": "8.0.1",
     "@electron/asar": "4.3.1",
     "@electron/fuses": "2.1.3",
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.63.0",
     "@testing-library/react": "16.3.3",
     "@types/node": "24.13.3",
     "@types/react": "19.3.0",
@@ -66,7 +66,7 @@
     "@vitest/coverage-v8": "4.1.11",
     "ajv": "8.17.1",
     "electron": "44.5.1",
-    "jsdom": "30.0.1",
+    "jsdom": "30.1.2",
     "lodash": "4.18.1",
     "pnpm": "11.21.0",
     "prettier": "3.9.9",

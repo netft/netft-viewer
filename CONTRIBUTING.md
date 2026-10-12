@@ -22,6 +22,8 @@ pixi run pnpm run start
 
 You may also provide the exact tools directly. Linux packaging additionally needs `fakeroot`, `dpkg-dev`, and `patchelf`. Windows builds use the Visual Studio C++ toolchain. macOS builds require Xcode command-line tools; signing and notarization are release-maintainer concerns and are not required for local development.
 
+Keep pnpm major upgrades coordinated across packageManager, the development dependency, Pixi, CI and the lockfile. Review any new install scripts before changing the build allowlist.
+
 ## Tests
 
 Run the checks relevant to your change while developing and the complete local gate before requesting review:
