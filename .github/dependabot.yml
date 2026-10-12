@@ -10,7 +10,9 @@ updates:
     open-pull-requests-limit: 6
     versioning-strategy: increase
     ignore:
+      # Coordinate packageManager, Pixi builds and CI in a maintainer update.
       - dependency-name: "pnpm"
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
       electron:

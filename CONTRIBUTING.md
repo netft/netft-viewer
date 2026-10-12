@@ -22,7 +22,9 @@ pixi run pnpm run start
 
 You may also provide the exact tools directly. Linux packaging additionally needs `fakeroot`, `dpkg-dev`, and `patchelf`. Windows builds use the Visual Studio C++ toolchain. macOS builds require Xcode command-line tools; signing and notarization are release-maintainer concerns and are not required for local development.
 
-Keep pnpm major upgrades coordinated across packageManager, the development dependency, Pixi, CI and the lockfile. Review any new install scripts before changing the build allowlist.
+Keep all pnpm upgrades coordinated across packageManager, the development dependency, Pixi, CI and the lockfile. Before upgrading, confirm the exact pnpm version is available for every platform in the Pixi environment. Review any new install scripts before changing the build allowlist.
+
+Keep @types/node on the supported Node.js 24 runtime line. Migrate the runtime and type definitions together before accepting a major type update.
 
 ## Tests
 
