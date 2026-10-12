@@ -64,7 +64,7 @@ jobs:
         shell: pwsh
         run: npm install --global --ignore-scripts pnpm@11.21.0
       - id: node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -108,7 +108,7 @@ jobs:
         name: Resolve artifact paths
         run: node tools/write-artifact-manifest.mjs "${{ matrix.platform }}" "${{ matrix.architecture }}" out
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.artifact_run_id }}
@@ -138,7 +138,7 @@ jobs:
         env:
           NETFT_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: ./tools/inspect-artifact-trust.ps1 -ArtifactDirectory existing-artifacts
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifact-trust-${{ inputs.artifact_platform }}-${{ inputs.artifact_run_id }}
           path: artifact-trust.json
@@ -230,7 +230,7 @@ jobs:
         run: npm install --global --ignore-scripts pnpm@11.21.0
       - id: node
         if: steps.signing-preflight.outputs.enabled == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -273,7 +273,7 @@ jobs:
         run: node tools/write-artifact-manifest.mjs darwin universal out
       - id: upload
         if: steps.signing-preflight.outputs.enabled == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: netft-viewer-macos-universal-signed
           path: ${{ steps.artifact-manifest.outputs.artifact_paths }}
