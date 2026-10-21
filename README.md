@@ -26,6 +26,10 @@ installation.
 Download the latest installer or portable archive from
 [GitHub Releases](https://github.com/netft/netft-viewer/releases).
 
+Verified releases are published as stable releases. Windows packages are unsigned;
+macOS packages use ad hoc signatures for code integrity and are not notarized.
+Operating-system policy may require explicit approval before opening the application.
+
 | Platform | Architecture            | Artifacts                          |
 | -------- | ----------------------- | ---------------------------------- |
 | Linux    | x86-64, ARM64           | `.deb`, portable `.tar.gz`         |
@@ -63,9 +67,9 @@ guidance. Report security issues through [SECURITY.md](SECURITY.md).
 Net F/T Viewer is licensed under the [Apache License 2.0](LICENSE). Required
 third-party license and notice texts are distributed in [LICENSES](LICENSES).
 
-## Recording metadata (0.2.0)
+## Recording metadata
 
-After successful data finalization, the candidate writes `<output>.metadata.json` using schema version 1 and kind `netft-recording`. CLI and Viewer share these meanings:
+Viewer 0.2.1 and later write `<output>.metadata.json` after successful data finalization, using schema version 1 and kind `netft-recording`. CLI 0.3.0 and later use the same schema and these shared meanings:
 
 | Field                                 | Meaning                                                                                                                                                                                                  |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -81,8 +85,8 @@ After successful data finalization, the candidate writes `<output>.metadata.json
 
 Partial or failed captures do not receive a completed summary. Metadata creation and promotion follow the data file's overwrite policy. The two files are finalized separately: a metadata failure reports an error and preserves the completed data file, and may leave a metadata partial for recovery. Keep both files when archiving a successful capture.
 
-The CLI candidate appends `configuration_revision` to CSV without moving existing columns and adds it inside the NDJSON sample object. Viewer already records revisions in each CSV row. Existing published releases retain their documented formats until these changes are released.
+CLI 0.3.0 and later append `configuration_revision` to CSV without moving existing columns and add it inside the NDJSON sample object. Viewer records revisions in each CSV row. Older releases retain their documented formats.
 
-## Window and zoom support (candidate)
+## Window and zoom support
 
-The candidate accepts windows down to 800 native pixels wide. A narrower CSS viewport caused by 125%–200% zoom reflows the toolbar and six plots; at 700 CSS pixels or below, the sidebar stacks above a scrollable plot workspace. Keyboard-operable plot controls retain visible focus. Charts expose image labels and live values remain available in the measurement table; connection and recording states use text in addition to color. Validated Linux scenes: 1440×900 at 100%, 1100×800 at 125%, and 1100×900 at 200%. Other desktop platforms still require release acceptance.
+The application accepts windows down to 800 native pixels wide. A narrower CSS viewport caused by 125%–200% zoom reflows the toolbar and six plots; at 700 CSS pixels or below, the sidebar stacks above a scrollable plot workspace. Keyboard-operable plot controls retain visible focus. Charts expose image labels and live values remain available in the measurement table; connection and recording states use text in addition to color. Layout interaction checks covered Linux scenes at 1440×900 with 100% zoom, 1100×800 with 125%, and 1100×900 with 200%. These layout checks are separate from the cross-platform native build and package startup checks required for release.
