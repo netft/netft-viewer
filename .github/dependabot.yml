@@ -1,3 +1,4 @@
+# Disable routine version-update PRs without changing security update or alert settings.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -7,7 +8,7 @@ updates:
       day: monday
       time: "05:00"
       timezone: Etc/UTC
-    open-pull-requests-limit: 6
+    open-pull-requests-limit: 0
     versioning-strategy: increase
     ignore:
       # Coordinate packageManager, Pixi builds and CI in a maintainer update.
@@ -57,7 +58,7 @@ updates:
       day: monday
       time: "05:30"
       timezone: Etc/UTC
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       actions:
         patterns:
