@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-21
+
 ### Maintenance
 
 - Update Electron, Forge, React and the development toolchain together; adapt main and preload bundles to Forge 8 CommonJS filenames.
@@ -16,6 +18,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Distribution
 
 - Publish verified releases as stable releases regardless of publisher signing configuration. Keep package integrity checks, draft byte verification and protected publication approval.
+- Windows packages are unsigned. macOS packages use ad hoc signatures for code integrity and are not notarized; operating-system policy may require explicit approval before opening the application.
 
 ## [0.2.1] - 2026-10-08
 
@@ -69,7 +72,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Use the netft-cpp v0.3.1 core so fail-stop sessions do not surface stalled or
   backward FT-sequence samples.
 
-[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/netft/netft-viewer/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/netft/netft-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/netft/netft-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/netft/netft-viewer/releases/tag/v0.1.0

@@ -60,7 +60,7 @@ Maintainers may ask for changes when a patch broadens platform risk, weakens rel
 
 By contributing, you agree that your contribution is licensed under the [Apache License 2.0](LICENSE).
 
-### Current core candidate
+### Current core snapshot
 
 The private snapshot uses the exact netft-cpp `v0.3.4` release commit `1ce68a08a9387d9a36d22c3c259e44533199c347`; `UPSTREAM` and its content manifest record that release identity. Update from a clean upstream checkout using:
 
