@@ -150,12 +150,16 @@ class LoopbackHTTPServer(ThreadingHTTPServer):
 
 
 class FakeSensor:
-    def __init__(self) -> None:
+    def __init__(self, *, include_product_name: bool = True) -> None:
+        product_name = (
+            b"<prodname>Process Fake</prodname>" if include_product_name else b""
+        )
+
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 body = (
-                    b"<netft><prodname>Process Fake</prodname>"
-                    b"<cfgcpf>1000000</cfgcpf><cfgcpt>1000000</cfgcpt>"
+                    b"<netft>" + product_name
+                    + b"<cfgcpf>1000000</cfgcpf><cfgcpt>1000000</cfgcpt>"
                     b"<scfgfu>N</scfgfu><scfgtu>N-m</scfgtu></netft>"
                 )
                 self.send_response(200)
@@ -251,6 +255,50 @@ class FakeSensor:
 
 
 class CompanionProcessTest(unittest.TestCase):
+    def test_missing_product_name_connects_and_streams_calibrated_data(self) -> None:
+        with FakeSensor(include_product_name=False) as sensor:
+            companion = CompanionProcess(
+                [
+                    f"--rdt-port={sensor.rdt_port}",
+                    f"--http-port={sensor.http_port}",
+                ]
+            )
+            try:
+                companion.send(
+                    command(
+                        "connect", "req-connect",
+                        payload={"sensorHost": "127.0.0.1"},
+                    )
+                )
+                connected, _ = companion.read_until(
+                    lambda event: event.get("requestId") == "req-connect"
+                )
+                self.assertTrue(connected["payload"]["success"])
+                sample, _ = companion.read_until(
+                    lambda event: event["type"] == "live_wrench"
+                )
+                for actual, expected in zip(
+                    sample["payload"]["force"], (0.0001, -0.0002, 0.0003)
+                ):
+                    self.assertAlmostEqual(actual, expected)
+                for actual, expected in zip(
+                    sample["payload"]["torque"], (0.00001, -0.00002, 0.00003)
+                ):
+                    self.assertAlmostEqual(actual, expected)
+                self.assertEqual(sample["payload"]["forceUnit"], "N")
+                self.assertEqual(sample["payload"]["torqueUnit"], "N-m")
+                health, _ = companion.read_until(
+                    lambda event: event["type"] == "health"
+                    and event["payload"].get("sensorConfiguration") is not None
+                )
+                configuration = health["payload"]["sensorConfiguration"]
+                self.assertEqual(configuration["productName"], "ATI Net F/T")
+                self.assertEqual(configuration["source"], "sensor")
+            finally:
+                companion.close()
+            self.assertIn(0x0002, sensor.commands)
+            self.assertNotIn(0x0042, sensor.commands)
+
     def test_hello_reports_matching_versions(self) -> None:
         companion = CompanionProcess()
         try:
