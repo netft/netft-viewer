@@ -7,6 +7,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-27
+
+### Fixed
+
+- Integrate netft-cpp 0.3.5 so legacy devices that omit `prodname` can connect using their valid calibration. Missing product names display as `ATI Net F/T`; required calibration and malformed-name checks remain enforced.
+
 ## [0.2.2] - 2026-10-21
 
 ### Maintenance
@@ -72,7 +78,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Use the netft-cpp v0.3.1 core so fail-stop sessions do not surface stalled or
   backward FT-sequence samples.
 
-[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/netft/netft-viewer/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/netft/netft-viewer/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/netft/netft-viewer/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/netft/netft-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/netft/netft-viewer/compare/v0.1.0...v0.1.1
